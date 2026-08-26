@@ -1,0 +1,20 @@
+# Phase 1 scratch work -- see docs/helm-phase1.md. Deliberately never committed.
+sandbox/
+rendered*.yaml
+*.rendered.yaml
+
+# Helm packaging output
+*.tgz
+charts/*/charts/
+charts/*/Chart.lock
+
+# Local-only value overrides (may contain real secrets)
+values-local.yaml
+*.local.yaml
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

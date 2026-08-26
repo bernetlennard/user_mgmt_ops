@@ -1,0 +1,30 @@
+postgres:
+  database: user_mgmt_db
+  auth:
+    username: admin
+    password: admin
+  persistence:
+    size: 1Gi
+    accessMode: ReadWriteOnce
+  replicaCount: 1
+  image:
+    repository: postgres
+    tag: 16-alpine
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  probes:
+    readiness:
+      exec:
+        command: [ "sh", "-c", 'exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' ]
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    liveness:
+      exec:
+        command: [ "sh", "-c", 'exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' ]
+      initialDelaySeconds: 15
+      periodSeconds: 20
