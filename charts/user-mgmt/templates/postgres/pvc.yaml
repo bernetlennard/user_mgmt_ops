@@ -1,7 +1,8 @@
+{{- if .Values.postgres.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Release.Name }}-postgres
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
   labels:
     app.kubernetes.io/name: user-mgmt
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -12,3 +13,4 @@ spec:
   resources:
     requests:
       storage: {{ .Values.postgres.persistence.size }}
+{{- end }}

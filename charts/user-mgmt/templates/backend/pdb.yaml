@@ -1,0 +1,13 @@
+{{- if .Values.backend.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "pdb") }}
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "pdb") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "pdb") | nindent 6 }}
+  minAvailable: {{ .Values.backend.podDisruptionBudget.minAvailable }}
+{{- end }}

@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "frontend") }}
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "frontend") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    {{- toYaml .Values.frontend.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "user-mgmt.labels" (dict "ctx" $ "component" "frontend") | nindent 8 }}
+    spec:
+      containers:
+        - name: auth-portal
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.frontend.service.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "frontend") }}
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.frontend.probes.readiness | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.frontend.probes.liveness | nindent 12 }}

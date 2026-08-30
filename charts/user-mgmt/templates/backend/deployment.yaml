@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "backend") | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  strategy:
+    {{- toYaml .Values.backend.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Change a ConfigMap value -> this hash changes -> the pod template changes
+        # -> the pod restarts and picks it up. `kubectl apply` never does this.
+        checksum/config: {{ include (print $.Template.BasePath "/backend/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 8 }}
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.backend.service.port }}
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
+                  key: POSTGRES_DB
+            # THE POINT OF THE WHOLE EXERCISE.
+            # Was: jdbc:postgresql://postgres:5432/$(POSTGRES_DB)
+            # -- which only worked because the Service happened to be named exactly
+            # `postgres`. Now that names are release-prefixed, that would break.
+            - name: SPRING_DATASOURCE_URL
+              value: {{ include "user-mgmt.postgres.jdbcUrl" $ | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}
+            - configMapRef:
+                name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.backend.probes.readiness | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.backend.probes.liveness | nindent 12 }}

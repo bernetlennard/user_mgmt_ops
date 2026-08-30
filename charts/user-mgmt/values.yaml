@@ -3,14 +3,17 @@ postgres:
   auth:
     username: admin
     password: admin
-  persistence:
-    size: 1Gi
-    accessMode: ReadWriteOnce
-  replicaCount: 1
   image:
     repository: postgres
-    tag: 16-alpine
+    tag: "16-alpine"
     pullPolicy: IfNotPresent
+  replicaCount: 1
+  strategy:
+    type: RollingUpdate
+  persistence:
+    enabled: true
+    size: 1Gi
+    accessMode: ReadWriteOnce
   resources:
     requests:
       cpu: 50m
@@ -28,3 +31,87 @@ postgres:
         command: [ "sh", "-c", 'exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' ]
       initialDelaySeconds: 15
       periodSeconds: 20
+backend:
+  image:
+    repository: xxpirl2knc5/user_mgmt_service
+    tag: latest
+    pullPolicy: Always
+  replicaCount: 1
+  strategy:
+    type: RollingUpdate
+  service:
+    port: 8080
+  config:
+    jwtIssuer: user-mgmt-service
+    jwtExpirationMillis: 3600000
+    ddlAuto: update
+    contextPath: /api
+    javaToolOptions: "-XX:MaxRAMPercentage=60"
+  jwtSecret: "CHANGE-ME-generate-a-fresh-key"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      memory: 700Mi
+  probes:
+    readiness:
+      tcpSocket: { port: 8080 }
+      initialDelaySeconds: 20
+      periodSeconds: 5
+      failureThreshold: 6
+    liveness:
+      tcpSocket: { port: 8080 }
+      initialDelaySeconds: 60
+      periodSeconds: 20
+      failureThreshold: 3
+  autoscaling: # <-- Aufgabe 6, shipped disabled
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+  podDisruptionBudget: # <-- Aufgabe 6, shipped disabled
+    enabled: false
+    minAvailable: 1
+frontend:
+  image:
+    name: auth-portal
+    repository: bernetlennard/auth_portal
+    tag: latest
+    pullPolicy: Always
+  replicaCount: 1
+  strategy:
+    type: RollingUpdate
+  service:
+    port: 3000
+    nodeEnv: "production"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  probes:
+    readiness:
+      httpGet:
+        path: /
+        port: 3000
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      failureThreshold: 6
+    liveness:
+      httpGet:
+        path: /
+        port: 3000
+      initialDelaySeconds: 30
+      periodSeconds: 20
+      failureThreshold: 3
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - vcs.lennardbernet.ch
+    - vcs.linosteiner.ch
+  tls:
+    enabled: true
+    certResolver: letsencrypt

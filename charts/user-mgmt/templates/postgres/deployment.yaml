@@ -1,30 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-postgres
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
   labels:
-    app.kubernetes.io/name: user-mgmt
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: postgres
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "postgres") | nindent 4 }}
 spec:
-  replicas: {{ .Values.postgres.replicaCount }}
+  replicas: 1
+  # Recreate, not RollingUpdate: the PVC is ReadWriteOnce, so two Postgres pods can
+  # never hold the data volume at once. Not a value -- it is structurally required.
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: user-mgmt
-      app.kubernetes.io/instance: {{ .Release.Name }}
-      app.kubernetes.io/component: postgres
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: user-mgmt
-        app.kubernetes.io/instance: {{ .Release.Name }}
-        app.kubernetes.io/component: postgres
+        {{- include "user-mgmt.labels" (dict "ctx" $ "component" "postgres") | nindent 8 }}
     spec:
       containers:
         - name: postgres
-          image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
           imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
           ports:
             - containerPort: 5432
@@ -33,9 +29,9 @@ spec:
               value: /var/lib/postgresql/data/pgdata
           envFrom:
             - secretRef:
-                name: {{ .Release.Name }}-postgres
+                name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
             - configMapRef:
-                name: {{ .Release.Name }}-postgres
+                name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
           volumeMounts:
             - name: postgres-storage
               mountPath: /var/lib/postgresql/data
@@ -48,4 +44,4 @@ spec:
       volumes:
         - name: postgres-storage
           persistentVolumeClaim:
-            claimName: {{ .Release.Name }}-postgres
+            claimName: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
