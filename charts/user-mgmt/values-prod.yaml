@@ -1,0 +1,4 @@
+# Overlay for the prod environment. values.yaml already reflects prod defaults
+# (ingress enabled, prod hostnames), so this file currently has no overrides.
+# It exists so ArgoCD's prod Application references a real per-environment
+# overlay from day one -- Aufgabe 5 will add ResourceQuota-relevant tuning here.

@@ -1,0 +1,4 @@
+# Overlay for the staging environment. Mirrors the --set ingress.enabled=false
+# override previously used for the manual `helm install um-staging` release.
+ingress:
+  enabled: false
