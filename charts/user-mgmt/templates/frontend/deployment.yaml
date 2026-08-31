@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "user-mgmt.labels" (dict "ctx" $ "component" "frontend") | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.frontend.replicaCount }}
   strategy:
     {{- toYaml .Values.frontend.strategy | nindent 4 }}
   selector:
@@ -13,12 +13,14 @@ spec:
       {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/frontend/configmap.yaml") . | sha256sum }}
       labels:
-        {{- include "user-mgmt.labels" (dict "ctx" $ "component" "frontend") | nindent 8 }}
+        {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 8 }}
     spec:
       containers:
-        - name: auth-portal
-          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+        - name: {{ .Values.frontend.image.name }}
+          image: {{ include "user-mgmt.image" .Values.frontend.image | quote }}
           imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.frontend.service.port }}

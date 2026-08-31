@@ -25,7 +25,10 @@ spec:
     - host: {{ . | quote }}
       http:
         paths:
-          - path: /api
+          # Same value as SERVER_SERVLET_CONTEXT_PATH in the backend ConfigMap -- the
+          # backend serves itself under that prefix, so the two must always agree.
+          # No stripPrefix needed (that would require a Traefik Middleware CRD).
+          - path: {{ $.Values.backend.config.contextPath }}
             pathType: Prefix
             backend:
               service:

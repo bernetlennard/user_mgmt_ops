@@ -5,25 +5,26 @@ metadata:
   labels:
     {{- include "user-mgmt.labels" (dict "ctx" $ "component" "postgres") | nindent 4 }}
 spec:
-  replicas: 1
-  # Recreate, not RollingUpdate: the PVC is ReadWriteOnce, so two Postgres pods can
-  # never hold the data volume at once. Not a value -- it is structurally required.
+  replicas: {{ .Values.postgres.replicaCount }}
+  # Defaults to Recreate -- see the comment on postgres.strategy in values.yaml.
   strategy:
-    type: Recreate
+    {{- toYaml .Values.postgres.strategy | nindent 4 }}
   selector:
     matchLabels:
       {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/postgres/configmap.yaml") . | sha256sum }}
       labels:
-        {{- include "user-mgmt.labels" (dict "ctx" $ "component" "postgres") | nindent 8 }}
+        {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 8 }}
     spec:
       containers:
-        - name: postgres
-          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+        - name: {{ .Values.postgres.image.name }}
+          image: {{ include "user-mgmt.image" .Values.postgres.image | quote }}
           imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
           ports:
-            - containerPort: 5432
+            - containerPort: {{ .Values.postgres.service.port }}
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata

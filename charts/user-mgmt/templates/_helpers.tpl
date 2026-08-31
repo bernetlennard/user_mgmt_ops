@@ -49,9 +49,17 @@ app.kubernetes.io/managed-by: {{ .ctx.Release.Service }}
 {{- end }}
 
 {{/*
+"repository:tag" for any of the three images. Takes the image dict itself rather than
+the root context: (include "user-mgmt.image" .Values.backend.image)
+*/}}
+{{- define "user-mgmt.image" -}}
+{{- printf "%s:%s" .repository .tag }}
+{{- end }}
+
+{{/*
 Kills the hardcoded jdbc:postgresql://postgres:5432/ in the original manifest.
 $(POSTGRES_DB) is left literal ON PURPOSE -- Kubernetes expands it, not Helm.
 */}}
 {{- define "user-mgmt.postgres.jdbcUrl" -}}
-{{- printf "jdbc:postgresql://%s:5432/$(POSTGRES_DB)" (include "user-mgmt.componentName" (dict "ctx" . "component" "postgres")) }}
+{{- printf "jdbc:postgresql://%s:%v/$(POSTGRES_DB)" (include "user-mgmt.componentName" (dict "ctx" . "component" "postgres")) .Values.postgres.service.port }}
 {{- end }}

@@ -21,8 +21,8 @@ spec:
         {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 8 }}
     spec:
       containers:
-        - name: backend
-          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+        - name: {{ .Values.backend.image.name }}
+          image: {{ include "user-mgmt.image" .Values.backend.image | quote }}
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.backend.service.port }}
@@ -38,6 +38,20 @@ spec:
             # `postgres`. Now that names are release-prefixed, that would break.
             - name: SPRING_DATASOURCE_URL
               value: {{ include "user-mgmt.postgres.jdbcUrl" $ | quote }}
+            # Wired one by one rather than with envFrom, because the names have to change
+            # on the way in: the credentials live in the Postgres Secret under POSTGRES_*
+            # (shared with the Postgres pod) but application.properties reads them as
+            # SPRING_DATASOURCE_*. envFrom cannot rename keys.
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
+                  key: POSTGRES_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
+                  key: POSTGRES_PASSWORD
           envFrom:
             - secretRef:
                 name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}

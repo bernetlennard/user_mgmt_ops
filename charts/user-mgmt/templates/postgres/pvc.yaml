@@ -4,9 +4,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
   labels:
-    app.kubernetes.io/name: user-mgmt
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: postgres
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "postgres") | nindent 4 }}
 spec:
   accessModes:
     - {{ .Values.postgres.persistence.accessMode }}

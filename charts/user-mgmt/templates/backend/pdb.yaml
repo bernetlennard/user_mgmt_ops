@@ -2,12 +2,14 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "pdb") }}
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}-pdb
   labels:
-    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "pdb") | nindent 4 }}
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "backend") | nindent 4 }}
 spec:
+  # Must be the BACKEND selector labels -- a PDB that selects nothing is silently
+  # accepted by the API server and protects nothing.
   selector:
     matchLabels:
-      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "pdb") | nindent 6 }}
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 6 }}
   minAvailable: {{ .Values.backend.podDisruptionBudget.minAvailable }}
 {{- end }}

@@ -4,12 +4,17 @@ postgres:
     username: admin
     password: admin
   image:
+    name: postgres
     repository: postgres
     tag: "16-alpine"
     pullPolicy: IfNotPresent
   replicaCount: 1
+  service:
+    port: 5432
+  # Recreate, not RollingUpdate: the PVC is ReadWriteOnce, so two Postgres pods can
+  # never hold the data volume at once. Overridable, but do not.
   strategy:
-    type: RollingUpdate
+    type: Recreate
   persistence:
     enabled: true
     size: 1Gi
@@ -33,6 +38,7 @@ postgres:
       periodSeconds: 20
 backend:
   image:
+    name: backend
     repository: xxpirl2knc5/user_mgmt_service
     tag: latest
     pullPolicy: Always
@@ -47,7 +53,9 @@ backend:
     ddlAuto: update
     contextPath: /api
     javaToolOptions: "-XX:MaxRAMPercentage=60"
-  jwtSecret: "CHANGE-ME-generate-a-fresh-key"
+  # HS256 signing key, 512 bit. Committed here because this repo is private -- see the
+  # "Secrets" section in README.md for why that is a deliberate simplification.
+  jwtSecret: "VIJQAsGSlarKapEGDwf1MgTiTIzvQJPEktgdisQeuRzjeUu1srpGNpbfhdnUPSZXYduiUAkNbMnKdQShQ7mFXw=="
   resources:
     requests:
       cpu: 100m

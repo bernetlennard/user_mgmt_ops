@@ -10,5 +10,5 @@ spec:
     {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 4 }}
   ports:
     - name: frontend
-      port: 3000
-      targetPort: 3000
+      port: {{ .Values.frontend.service.port }}
+      targetPort: {{ .Values.frontend.service.port }}

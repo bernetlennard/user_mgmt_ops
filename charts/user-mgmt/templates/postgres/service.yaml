@@ -10,5 +10,5 @@ spec:
     {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 4 }}
   ports:
     - name: postgres
-      port: 5432
-      targetPort: 5432
+      port: {{ .Values.postgres.service.port }}
+      targetPort: {{ .Values.postgres.service.port }}

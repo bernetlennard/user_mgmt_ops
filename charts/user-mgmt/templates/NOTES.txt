@@ -1,0 +1,31 @@
+Release {{ .Release.Name }} ({{ .Chart.Name }}-{{ .Chart.Version }}) installed into namespace {{ .Release.Namespace }}.
+
+Components:
+  postgres  {{ include "user-mgmt.image" .Values.postgres.image }}
+  backend   {{ include "user-mgmt.image" .Values.backend.image }}
+  frontend  {{ include "user-mgmt.image" .Values.frontend.image }}
+
+Watch it come up:
+
+  kubectl -n {{ .Release.Namespace }} get pods -w -l app.kubernetes.io/instance={{ .Release.Name }}
+
+{{ if .Values.ingress.enabled -}}
+Reachable at:
+{{ range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls.enabled }}s{{ end }}://{{ . }}
+{{- end }}
+
+A {{ .Values.backend.config.contextPath }}/users request answering 403 is the success case -- the
+backend received it and rejected it for lack of a JWT. A 404 means Traefik routed it to
+the frontend instead, i.e. the Ingress is wrong.
+{{- else -}}
+The Ingress is DISABLED for this release. Reach it directly:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "user-mgmt.componentName" (dict "ctx" $ "component" "frontend") }} {{ .Values.frontend.service.port }}:{{ .Values.frontend.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }} {{ .Values.backend.service.port }}:{{ .Values.backend.service.port }}
+{{- end }}
+
+{{ if not .Values.backend.autoscaling.enabled -}}
+Note: backend.autoscaling and backend.podDisruptionBudget are disabled (Aufgabe 6 keys,
+shipped early so enabling them is a values change, not a chart change).
+{{- end }}
