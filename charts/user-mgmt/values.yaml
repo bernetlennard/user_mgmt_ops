@@ -40,8 +40,12 @@ backend:
   image:
     name: backend
     repository: xxpirl2knc5/user_mgmt_service
+    # Owned by the pipeline: the build-and-promote workflow in the app repo rewrites this
+    # line to the commit SHA it just pushed. Edit it by hand only to roll back.
     tag: latest
-    pullPolicy: Always
+    # IfNotPresent, not Always: the tag is an immutable commit SHA, so a pod that already
+    # has the layer can never be looking at a stale image.
+    pullPolicy: IfNotPresent
   replicaCount: 1
   strategy:
     type: RollingUpdate
