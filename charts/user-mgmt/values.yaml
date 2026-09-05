@@ -88,9 +88,16 @@ backend:
 frontend:
   image:
     name: auth-portal
-    repository: bernetlennard/auth_portal
-    tag: latest
-    pullPolicy: Always
+    # The repository CI actually publishes to. bernetlennard/auth_portal was a hand-pushed
+    # :latest that no pipeline ever writes -- pointing the chart at it meant the cluster
+    # ran whatever was last uploaded by hand.
+    repository: xxpirl2knc5/auth_portal
+    # Owned by the pipeline: the build-and-promote workflow in the auth_portal repo
+    # rewrites this line to the commit SHA it just pushed. Edit it by hand only to roll back.
+    tag: "6091b0a58e073b0a127c813359abfdde3f37822c"
+    # IfNotPresent, not Always: the tag is an immutable commit SHA, so a pod that already
+    # has the layer can never be looking at a stale image.
+    pullPolicy: IfNotPresent
   replicaCount: 1
   strategy:
     type: RollingUpdate
