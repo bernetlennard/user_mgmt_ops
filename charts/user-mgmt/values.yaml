@@ -151,6 +151,9 @@ frontend:
   service:
     port: 3000
     nodeEnv: "production"
+  environment:
+    label: ""
+    tone: warning
   resources:
     requests:
       cpu: 50m
