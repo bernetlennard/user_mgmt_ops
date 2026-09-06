@@ -137,7 +137,7 @@ frontend:
     name: auth-portal
     repository: xxpirl2knc5/auth_portal
     # Owned by the promote pipeline in the auth_portal repo. Edit by hand only to roll back.
-    tag: "78f99c0e4d8ad4d31732dd28f0ed5b10a90bae97"
+    tag: "7c5429f06c75629d526eea526544e4f16ae09ca9"
     # The tag is an immutable commit SHA, so a cached layer can never be stale.
     pullPolicy: IfNotPresent
   # No HPA: Next.js serving pre-rendered pages is not CPU-bound, so a cpu target would never
