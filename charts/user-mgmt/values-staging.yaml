@@ -72,6 +72,11 @@ backend:
 frontend:
   # One replica: staging is the preview environment, prod is the HA one. See the header.
   replicaCount: 1
+  # Amber "STAGING" strip above every page, so a screenshot or a stray browser tab is
+  # never mistaken for production. Prod deliberately leaves this empty and shows nothing.
+  environment:
+    label: Staging
+    tone: warning
   resources:
     requests:
       cpu: 50m

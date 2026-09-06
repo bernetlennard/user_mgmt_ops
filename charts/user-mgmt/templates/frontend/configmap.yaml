@@ -13,4 +13,8 @@ data:
   # frontend at prod. The browser never sees this value -- client components call the
   # api under a relative /api path on whatever host they were served from.
   BACKEND_API_URL: {{ include "user-mgmt.backend.internalUrl" . | quote }}
+  # Which environment the UI says it is. Empty here means no banner at all -- see
+  # frontend.environment in values.yaml.
+  APP_ENV_LABEL: {{ .Values.frontend.environment.label | quote }}
+  APP_ENV_TONE: {{ .Values.frontend.environment.tone | quote }}
 

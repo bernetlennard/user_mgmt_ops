@@ -197,6 +197,16 @@ frontend:
   service:
     port: 3000
     nodeEnv: "production"
+  # Environment marker the frontend renders as a thin banner above the page. Read at
+  # runtime from the ConfigMap, like BACKEND_API_URL -- the image stays the same in every
+  # environment.
+  #
+  # An empty label renders NOTHING, which is why prod needs no override: the unset value
+  # fails towards the quiet, production-looking state instead of towards a stray banner.
+  # `tone` is whitelisted in the component; anything unknown falls back to `warning`.
+  environment:
+    label: ""
+    tone: warning
   resources:
     requests:
       cpu: 50m
