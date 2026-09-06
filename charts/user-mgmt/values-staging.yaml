@@ -4,10 +4,22 @@
 # values.yaml. Staging is the tighter of the two environments: no public ingress, lower
 # cpu ceilings, a smaller namespace quota.
 
-# No Ingress object. One Traefik serves the whole cluster and owns the public hostnames;
-# staging is reached with `kubectl port-forward` instead of a second set of DNS names.
+# Staging has its own public hostname, served by the same Traefik as prod.
+#
+# `hosts` MUST be the complete list, not an addition: Helm replaces the list wholesale, and
+# anything left out here is NOT inherited -- but anything left IN that belongs to prod would
+# create a second Ingress object claiming prod's hostname, and Traefik would route it
+# unpredictably. Exactly one environment may own a given host.
+#
+# Safe to expose only since the frontend resolves its api at runtime (BACKEND_API_URL for
+# the server-side handlers, a relative /api for the browser). Before that, the api address
+# was baked into the image and pointed at prod -- an exposed staging would have written
+# into prod's database.
 ingress:
-  enabled: false
+  enabled: true
+  hosts:
+    - vcs-staging.lennardbernet.ch
+    - vcs-staging.linosteiner.ch
 
 postgres:
   resources:
