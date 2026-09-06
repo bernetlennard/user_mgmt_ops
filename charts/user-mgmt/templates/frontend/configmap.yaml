@@ -7,4 +7,10 @@ metadata:
 data:
   PORT: {{ .Values.frontend.service.port | quote }}
   NODE_ENV: {{ .Values.frontend.service.nodeEnv | quote }}
+  # Read at RUNTIME by the server-side route handlers in app/auth/. Deliberately not
+  # prefixed NEXT_PUBLIC_: Next.js inlines those into the bundle at build time, which is
+  # exactly what made the api endpoint un-parametrizable and pointed every environment's
+  # frontend at prod. The browser never sees this value -- client components call the
+  # api under a relative /api path on whatever host they were served from.
+  BACKEND_API_URL: {{ include "user-mgmt.backend.internalUrl" . | quote }}
 

@@ -57,6 +57,18 @@ the root context: (include "user-mgmt.image" .Values.backend.image)
 {{- end }}
 
 {{/*
+Base url the frontend's server-side route handlers use to reach the backend from inside
+the cluster. Release-prefixed, so each environment resolves to its own backend Service --
+that is what keeps staging's logins out of prod's database.
+
+Deliberately not a public url: the in-cluster call skips the trip out through the
+LoadBalancer and back in, and the NetworkPolicy already allows frontend -> backend.
+*/}}
+{{- define "user-mgmt.backend.internalUrl" -}}
+{{- printf "http://%s:%v%s" (include "user-mgmt.componentName" (dict "ctx" . "component" "backend")) .Values.backend.service.port .Values.backend.config.contextPath }}
+{{- end }}
+
+{{/*
 Kills the hardcoded jdbc:postgresql://postgres:5432/ in the original manifest.
 $(POSTGRES_DB) is left literal ON PURPOSE -- Kubernetes expands it, not Helm.
 */}}
