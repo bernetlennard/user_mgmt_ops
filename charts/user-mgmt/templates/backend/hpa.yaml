@@ -1,12 +1,10 @@
 {{- if .Values.backend.autoscaling.enabled }}
-# The HPA owns spec.replicas of the backend Deployment from here on. Two consequences
-# worth knowing before touching anything:
+# While this is enabled the HPA owns spec.replicas of the backend Deployment, which therefore
+# stops rendering the field (see templates/backend/deployment.yaml).
 #
-#   - templates/backend/deployment.yaml stops rendering `replicas` while this is enabled,
-#     so that ArgoCD's selfHeal does not revert every scale-out as drift.
-#   - The autoscaler can only create pods the namespace ResourceQuota still has room for.
-#     A quota that fits only today's replicas turns itself into the scaling limit, and the
-#     symptom is a silent "exceeded quota" on the ReplicaSet rather than an HPA error.
+# The autoscaler can only create pods the namespace ResourceQuota has room for. A quota that
+# fits only the current replicas becomes the scaling limit, and says so as "exceeded quota" on
+# the ReplicaSet rather than on the HPA.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -21,8 +19,7 @@ spec:
     kind: Deployment
     name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}
   metrics:
-    # Utilisation is measured against the container's cpu REQUEST, not its limit. With
-    # requests.cpu 100m and a 70% target, a pod sustaining ~70m triggers a scale-out.
+    # Utilisation is measured against the container's cpu request, not its limit.
     - type: Resource
       resource:
         name: cpu

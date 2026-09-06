@@ -6,15 +6,12 @@ metadata:
     {{- include "user-mgmt.labels" (dict "ctx" $ "component" "backend") | nindent 4 }}
 spec:
   type: ClusterIP
-  # Stated rather than left to the default, because Aufgabe 6 turns on the behaviour it
-  # governs: with no affinity, every request is distributed round-robin across the
-  # EndpointSlice, and an EndpointSlice contains only pods that pass their readinessProbe
-  # (publishNotReadyAddresses is not set). Setting ClientIP here would pin each client to
-  # one replica and quietly undo the load balancing. Safe because the API is stateless --
-  # authentication is a JWT in the request, not a server-side session.
+  # Stated rather than defaulted: no affinity means requests go round-robin over the ready
+  # endpoints, while ClientIP would pin each client to one replica. Safe because the API is
+  # stateless -- authentication is a JWT in the request, not a server-side session.
   sessionAffinity: None
-  # The Actuator port (backend.management.port) is deliberately NOT published here. Only
-  # the kubelet talks to it, directly on the pod IP.
+  # The Actuator port (backend.management.port) is deliberately not published here; only the
+  # kubelet talks to it, on the pod IP.
   selector:
     {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 4 }}
   ports:

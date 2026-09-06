@@ -6,9 +6,8 @@ metadata:
     {{- include "user-mgmt.labels" (dict "ctx" $ "component" "frontend") | nindent 4 }}
 spec:
   type: ClusterIP
-  # See the note on the backend Service: no affinity means round-robin over the ready
-  # endpoints only. The frontend keeps no server-side session either -- the JWT lives in
-  # a cookie the browser sends with every request -- so any replica can serve any user.
+  # As on the backend Service: round-robin over the ready endpoints. No server-side session
+  # here either -- the JWT lives in a cookie -- so any replica can serve any user.
   sessionAffinity: None
   selector:
     {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 4 }}

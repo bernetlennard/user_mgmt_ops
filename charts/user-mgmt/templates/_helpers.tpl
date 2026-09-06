@@ -6,8 +6,8 @@ Chart name, overridable. Used as app.kubernetes.io/name.
 {{- end }}
 
 {{/*
-Release-prefixed base name. Everything the chart creates is named from this,
-which is what makes two installs in two namespaces collision-free.
+Release-prefixed base name. Everything the chart creates is named from this, so two installs
+in two namespaces cannot collide.
 */}}
 {{- define "user-mgmt.fullname" -}}
 {{- if .Values.fullnameOverride }}
@@ -57,33 +57,25 @@ the root context: (include "user-mgmt.image" .Values.backend.image)
 {{- end }}
 
 {{/*
-Base url the frontend's server-side route handlers use to reach the backend from inside
-the cluster. Release-prefixed, so each environment resolves to its own backend Service --
-that is what keeps staging's logins out of prod's database.
-
-Deliberately not a public url: the in-cluster call skips the trip out through the
-LoadBalancer and back in, and the NetworkPolicy already allows frontend -> backend.
+Base url the frontend's server-side route handlers use to reach the backend. Release-prefixed
+and in-cluster, so each environment resolves to its own backend Service and the call skips the
+trip out through the LoadBalancer and back in.
 */}}
 {{- define "user-mgmt.backend.internalUrl" -}}
 {{- printf "http://%s:%v%s" (include "user-mgmt.componentName" (dict "ctx" . "component" "backend")) .Values.backend.service.port .Values.backend.config.contextPath }}
 {{- end }}
 
 {{/*
-PodDisruptionBudget for one component (Aufgabe 6). One definition serves backend and
-frontend: (dict "ctx" $ "component" "backend").
+PodDisruptionBudget for one component: (dict "ctx" $ "component" "backend").
 
-A PDB caps how many pods may be taken away by VOLUNTARY disruption -- a node drain, a
-re-schedule -- and has no say over a crash or an OOM kill. The two ways to express it are
-not interchangeable:
+A PDB caps how many pods a VOLUNTARY disruption (a drain, a re-schedule) may take; it has no
+say over crashes or OOM kills. Exactly one of the two forms must be set:
 
-  minAvailable   "keep at least N serving". Correct when several replicas run, but on a
-                 single-replica Deployment minAvailable: 1 blocks every eviction forever
-                 and a drain hangs instead of finishing.
-  maxUnavailable "allow at most N to go at once". Correct for a single replica, because
-                 the drain can still proceed.
+  minAvailable   "keep at least N serving". For several replicas. On a single-replica
+                 Deployment minAvailable: 1 permits no eviction at all and a drain hangs.
+  maxUnavailable "allow at most N to go at once". Correct for a single replica.
 
-Setting both is a contradiction and Kubernetes rejects it; setting neither renders a PDB
-that guards nothing. Both are caught here, at template time, rather than in the cluster.
+Both or neither fails here at template time rather than in the cluster.
 */}}
 {{- define "user-mgmt.podDisruptionBudget" -}}
 {{- $cfg := (index .ctx.Values .component).podDisruptionBudget -}}
@@ -103,8 +95,8 @@ metadata:
   labels:
     {{- include "user-mgmt.labels" . | nindent 4 }}
 spec:
-  # Must be THIS component's selector labels -- a PDB that selects nothing is silently
-  # accepted by the API server and protects nothing.
+  # Must be this component's selector labels: a PDB that selects nothing is accepted
+  # silently and protects nothing.
   selector:
     matchLabels:
       {{- include "user-mgmt.selectorLabels" . | nindent 6 }}
@@ -117,8 +109,8 @@ spec:
 {{- end }}
 
 {{/*
-Kills the hardcoded jdbc:postgresql://postgres:5432/ in the original manifest.
-$(POSTGRES_DB) is left literal ON PURPOSE -- Kubernetes expands it, not Helm.
+JDBC url built from the release-prefixed Postgres Service name.
+$(POSTGRES_DB) stays literal on purpose -- Kubernetes expands it, not Helm.
 */}}
 {{- define "user-mgmt.postgres.jdbcUrl" -}}
 {{- printf "jdbc:postgresql://%s:%v/$(POSTGRES_DB)" (include "user-mgmt.componentName" (dict "ctx" . "component" "postgres")) .Values.postgres.service.port }}

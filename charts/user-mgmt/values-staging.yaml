@@ -1,27 +1,15 @@
-# Overlay for the staging environment (namespace `staging`).
+# Overlay for the staging environment (namespace `staging`), applied by
+# argocd/application-staging.yaml on top of values.yaml.
 #
-# Applied by the ArgoCD Application argocd/application-staging.yaml, layered on top of
-# values.yaml. Staging is the tighter of the two environments: lower cpu ceilings, a
-# smaller namespace quota, and single-replica components.
-#
-# That last point is a capacity decision, not an oversight. Both namespaces share one
-# 2 vCPU / 4 GB node with 1263m / 2156Mi available to them together (see values-prod.yaml
-# and docs/scaling.md). Prod is the environment that has to demonstrate high availability,
-# so prod gets the replicas; staging keeps just enough to prove the same chart renders and
-# runs. Giving staging a second frontend replica would consume exactly the headroom that
-# prod's autoscaler needs to take its scale-out step.
+# Staging is the tighter of the two: lower cpu ceilings, a smaller quota, single-replica
+# components. That is a capacity decision -- both namespaces share one 2 vCPU / 4 GB node
+# (see values-prod.yaml and docs/scaling.md), and a second staging replica would consume
+# exactly the headroom prod's autoscaler needs.
 
-# Staging has its own public hostname, served by the same Traefik as prod.
-#
-# `hosts` MUST be the complete list, not an addition: Helm replaces the list wholesale, and
-# anything left out here is NOT inherited -- but anything left IN that belongs to prod would
-# create a second Ingress object claiming prod's hostname, and Traefik would route it
-# unpredictably. Exactly one environment may own a given host.
-#
-# Safe to expose only since the frontend resolves its api at runtime (BACKEND_API_URL for
-# the server-side handlers, a relative /api for the browser). Before that, the api address
-# was baked into the image and pointed at prod -- an exposed staging would have written
-# into prod's database.
+# Staging's own public hostnames, served by the same Traefik as prod.
+# `hosts` must be the complete list: Helm replaces it wholesale, so anything left out is not
+# inherited -- and anything of prod's left in would create a second Ingress claiming prod's
+# hostname. Exactly one environment may own a given host.
 ingress:
   enabled: true
   hosts:
@@ -38,33 +26,28 @@ postgres:
       memory: 256Mi
 
 backend:
-  # 750m instead of prod's 1 core. Still comfortably above what JVM startup needs inside
-  # the startupProbe window; do not drop this to 500m or below or the rollout starts to flap.
+  # 750m cpu instead of prod's full core, still above what JVM startup needs inside the
+  # startupProbe window. Do not go to 500m or below or the rollout starts to flap. The memory
+  # limit stays at the prod value because the JVM sizes its heap from it (MaxRAMPercentage=60).
   resources:
     requests:
       cpu: 100m
       memory: 320Mi
     limits:
       cpu: 750m
-      # Memory limit stays at the prod value: the JVM sizes its heap from it
-      # (-XX:MaxRAMPercentage=60), so lowering it here would risk an OOM kill that
-      # prod would not have.
       memory: 700Mi
 
-  # The HPA is enabled here too -- the point is that both environments run the same
-  # mechanism, not that staging carries load. It scales 1 -> 2 rather than prod's 2 -> 3,
-  # which is what the shared node has left over once prod has taken its headroom.
+  # Enabled so both environments run the same mechanism, not because staging carries load.
+  # 1 -> 2 is what the shared node has left once prod has taken its headroom.
   autoscaling:
     enabled: true
     minReplicas: 1
     maxReplicas: 2
     targetCPUUtilizationPercentage: 70
 
-  # maxUnavailable, NOT minAvailable -- and this is the difference that matters between
-  # the two environments. At minReplicas 1 a `minAvailable: 1` budget would permit zero
-  # voluntary disruptions: a node drain would block forever rather than complete, and
-  # `kubectl get pdb` would read ALLOWED DISRUPTIONS 0. Phrased as "at most one may go at
-  # a time", the same intent still lets maintenance proceed.
+  # maxUnavailable, not minAvailable: at minReplicas 1 a `minAvailable: 1` budget would permit
+  # zero voluntary disruptions, so a node drain would block forever. "At most one may go at a
+  # time" expresses the same intent and still lets maintenance proceed.
   podDisruptionBudget:
     enabled: true
     maxUnavailable: 1
@@ -88,12 +71,9 @@ frontend:
     enabled: true
     maxUnavailable: 1
 
-# Namespace ceiling for `staging`.
-#
-# Worst case is the autoscaler at maxReplicas WHILE a rollout is in flight -- each
-# RollingUpdate creates its replacement before retiring the old pod (maxSurge 1,
-# maxUnavailable 0), so backend can briefly be 2 + 1 = 3 pods and frontend 1 + 1 = 2.
-# Postgres is `strategy: Recreate` and never surges.
+# Namespace ceiling for `staging`. Worst case is the autoscaler at maxReplicas during a
+# rollout: backend 2 + 1 surge = 3 pods, frontend 1 + 1 = 2, postgres 1 (Recreate, never
+# surges).
 #
 #   pods            = 3 backend + 2 frontend + 1 postgres      =    6
 #   requests.cpu    =  50m + 3x100m + 2x50m                    =  450m
@@ -101,10 +81,9 @@ frontend:
 #   limits.cpu      = 200m + 3x750m + 2x200m                   = 2850m
 #   limits.memory   = 256Mi + 3x700Mi + 2x256Mi                = 2868Mi
 #
-# limits.memory is the number that moved for Aufgabe 6: at 2560Mi the quota, not the node,
-# would have been what stopped the autoscaler -- and a quota-blocked scale-out fails
-# silently, as "exceeded quota" on the ReplicaSet rather than as anything visible on the
-# HPA. 3Gi clears the 2868Mi worst case.
+# limits.memory at 3Gi is the tightest of the ceilings: below the 2868Mi worst case the quota,
+# not the node, would stop the autoscaler -- and that fails silently, as "exceeded quota" on
+# the ReplicaSet rather than as anything visible on the HPA.
 resourceQuota:
   enabled: true
   hard:
@@ -115,7 +94,7 @@ resourceQuota:
     pods: "8"
     persistentvolumeclaims: "2"
 
-# Deny-by-default networking; see templates/networkpolicy.yaml for the five objects
-# this switch creates. Selector values are inherited from values.yaml.
+# Deny-by-default networking; see templates/networkpolicy.yaml. Selector values are inherited
+# from values.yaml.
 networkPolicy:
   enabled: true

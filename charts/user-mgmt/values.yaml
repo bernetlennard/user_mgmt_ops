@@ -1,3 +1,9 @@
+# Base values. Each environment layers values-prod.yaml or values-staging.yaml on top.
+#
+# Every container declares cpu and memory limits: the namespace ResourceQuota caps limits.*,
+# and Kubernetes rejects containers without them. Requests sit close to measured usage
+# because the cluster is a single small node -- the arithmetic is in docs/scaling.md.
+
 postgres:
   database: user_mgmt_db
   auth:
@@ -11,22 +17,13 @@ postgres:
   replicaCount: 1
   service:
     port: 5432
-  # Recreate, not RollingUpdate: the PVC is ReadWriteOnce, so two Postgres pods can
-  # never hold the data volume at once. Overridable, but do not.
+  # Recreate: the PVC is ReadWriteOnce, so two Postgres pods can never hold the volume at once.
   strategy:
     type: Recreate
   persistence:
     enabled: true
     size: 1Gi
     accessMode: ReadWriteOnce
-  # The cpu limit is mandatory, not tuning: the namespace ResourceQuota (Aufgabe 5)
-  # declares limits.cpu, and Kubernetes rejects every pod in that namespace that does
-  # not declare one of its own. Same reasoning for the other two components.
-  #
-  # The memory REQUEST is what the scheduler reserves, and it is the scarce number on a
-  # single-node cluster -- every Mi requested here is a Mi the backend cannot scale into.
-  # 96Mi against a measured 44Mi RSS is roughly 2x headroom; see docs/scaling.md for the
-  # node budget this comes out of.
   resources:
     requests:
       cpu: 50m
@@ -49,21 +46,14 @@ backend:
   image:
     name: backend
     repository: xxpirl2knc5/user_mgmt_service
-    # Owned by the pipeline: the build-and-promote workflow in the app repo rewrites this
-    # line to the commit SHA it just pushed. Edit it by hand only to roll back.
+    # Owned by the promote pipeline in the app repo. Edit by hand only to roll back.
     tag: "bd509cc275e5ef13f53c01f168f9bcaf8f32f16e"
-    # IfNotPresent, not Always: the tag is an immutable commit SHA, so a pod that already
-    # has the layer can never be looking at a stale image.
+    # The tag is an immutable commit SHA, so a cached layer can never be stale.
     pullPolicy: IfNotPresent
-  # Only consulted when autoscaling is DISABLED. With an HPA present the Deployment
-  # template omits spec.replicas entirely -- see templates/backend/deployment.yaml for
-  # why that omission is load-bearing rather than cosmetic.
+  # Only used when autoscaling is disabled; with an HPA the Deployment omits spec.replicas.
   replicaCount: 1
-  # maxUnavailable: 0 is the "no service interruption" half of Aufgabe 6: the replacement
-  # pod must be Ready before any old pod is taken away, so the number of serving pods
-  # never dips below the desired count. maxSurge: 1 is the price -- exactly one extra pod
-  # for the duration of the rollout, which is what the ResourceQuota and the node budget
-  # in docs/scaling.md are sized for.
+  # maxUnavailable 0: the replacement pod must be Ready before an old one is taken away, so
+  # the number of serving pods never dips. The price is one extra pod during a rollout.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -71,12 +61,8 @@ backend:
       maxSurge: 1
   service:
     port: 8080
-  # Actuator's port. Deliberately NOT the service port: the Ingress routes the whole /api
-  # prefix from the internet to the backend Service, so an Actuator on 8080 would publish
-  # /api/actuator/health on the public hostname. 8081 appears in no Service and in no
-  # Ingress -- only the kubelet, probing the pod IP from the node, reaches it.
-  #
-  # The anchor is referenced by all three probes below so the port is stated once.
+  # Actuator's port. No Service and no Ingress reference it, so /actuator stays off the public
+  # hostname -- only the kubelet reaches it on the pod IP. The anchor is reused by the probes.
   management:
     port: &backendManagementPort 8081
   config:
@@ -85,21 +71,11 @@ backend:
     ddlAuto: update
     contextPath: /api
     javaToolOptions: "-XX:MaxRAMPercentage=60"
-  # HS256 signing key, 512 bit. Committed here because this repo is private -- see the
-  # "Secrets" section in README.md for why that is a deliberate simplification.
+  # HS256 signing key, 512 bit. Plain text because this repo is private -- see README, "Secrets".
   jwtSecret: "VIJQAsGSlarKapEGDwf1MgTiTIzvQJPEktgdisQeuRzjeUu1srpGNpbfhdnUPSZXYduiUAkNbMnKdQShQ7mFXw=="
-  # 1 core of LIMIT, deliberately generous: a cpu limit throttles JVM startup, and a
-  # throttled start is a slow start. Limits are ceilings, not reservations -- an idle pod
-  # costs nothing for having a high one.
-  #
-  # The cpu REQUEST is a different matter entirely, because the HPA measures utilisation
-  # against it: at 100m request and a 70% target, the backend scales out once a pod is
-  # sustaining ~70m. Raising this number makes the autoscaler less eager, lowering it
-  # makes it twitchier -- it is the HPA's sensitivity dial, not just a scheduling hint.
-  #
-  # The memory request is 320Mi against a measured 252Mi RSS. It is deliberately close:
-  # on a single-node cluster every requested Mi is one the autoscaler cannot scale into.
-  # The arithmetic is in docs/scaling.md.
+  # The cpu limit is generous on purpose: a throttled JVM starts slowly, and a limit costs
+  # nothing while idle. The cpu request is the HPA's sensitivity dial -- utilisation is
+  # measured against it, so lowering it makes the autoscaler twitchier.
   resources:
     requests:
       cpu: 100m
@@ -107,14 +83,10 @@ backend:
     limits:
       cpu: "1"
       memory: 700Mi
-  # All three probes hit Spring Boot Actuator on the management port, never the service
-  # port. The previous tcpSocket check called a pod "ready" the moment Tomcat bound its
-  # socket, which says nothing about the datasource behind it.
+  # All three probes hit Spring Boot Actuator on the management port, never the service port.
   probes:
-    # The startupProbe is what makes the other two safe to tighten. While it runs,
-    # readiness and liveness are suspended entirely -- so a slow JVM start cannot be
-    # mistaken for a hung process. 30 x 5s = 150s of grace; after that the container is
-    # restarted, which is the correct answer for a start that never finishes.
+    # Suspends readiness and liveness until it succeeds once, so a slow JVM start is not
+    # mistaken for a hung process. 30 x 5s = 150s of grace, then the container is restarted.
     startup:
       httpGet:
         path: /actuator/health/liveness
@@ -122,11 +94,8 @@ backend:
       periodSeconds: 5
       failureThreshold: 30
       timeoutSeconds: 3
-    # Readiness governs Service membership: fail it and the pod is removed from the
-    # EndpointSlice, so neither Traefik nor the frontend routes to it. The readiness group
-    # includes the `db` indicator (configured in the application), so a pod that has lost
-    # Postgres stops receiving traffic instead of accepting requests it cannot serve.
-    # No initialDelaySeconds -- that is the startupProbe's job now.
+    # Governs Service membership. The readiness group includes the `db` indicator, so a pod
+    # that lost Postgres leaves the EndpointSlice instead of accepting requests it cannot serve.
     readiness:
       httpGet:
         path: /actuator/health/readiness
@@ -134,9 +103,8 @@ backend:
       periodSeconds: 5
       failureThreshold: 3
       timeoutSeconds: 3
-    # Liveness governs restarts, so it must react to a broken PROCESS and to nothing else.
-    # It checks livenessState, which does not include the database on purpose: a Postgres
-    # outage must not turn into a cluster-wide restart loop of the backend.
+    # Governs restarts, so it reacts to a broken process only. livenessState excludes the
+    # database: a Postgres outage must not turn into a restart loop of every backend pod.
     liveness:
       httpGet:
         path: /actuator/health/liveness
@@ -144,50 +112,36 @@ backend:
       periodSeconds: 20
       failureThreshold: 3
       timeoutSeconds: 3
-  # --- Aufgabe 6: horizontal scaling ------------------------------------------------
-  # Off here, on in both environment overlays -- same pattern as resourceQuota and
-  # networkPolicy below. The base file stays installable on its own; the numbers that
-  # actually differ between staging and prod live in one place per environment.
+  # Off here, on in both overlays, which is where the per-environment numbers live.
   autoscaling:
     enabled: false
     minReplicas: 1
     maxReplicas: 2
-    # Utilisation is relative to the cpu REQUEST above, not to the limit. 70% of 100m.
+    # Relative to the cpu request above, not the limit: 70% of 100m.
     targetCPUUtilizationPercentage: 70
-    # Deliberately CPU only. A memory-based HPA on a JVM never scales back down: the heap
-    # is not returned to the OS once grown, so the metric would stay high forever.
+    # CPU only. A JVM does not return heap to the OS, so a memory target would never scale down.
     behavior:
       scaleUp:
-        # React immediately. The default 0s is stated explicitly because it is a choice:
-        # load arrives faster than a JVM starts, so there is nothing to gain from waiting.
+        # Load arrives faster than a JVM starts, so there is nothing to gain from waiting.
         stabilizationWindowSeconds: 0
       scaleDown:
-        # Five minutes of sustained calm before giving a replica back. Scaling down early
-        # is how an autoscaler ends up flapping.
+        # Five minutes of calm before giving a replica back; scaling down early causes flapping.
         stabilizationWindowSeconds: 300
-  # Enabling this REQUIRES setting exactly one of minAvailable / maxUnavailable, and the
-  # template refuses to render if you set both or neither. Neither is set here on purpose:
-  # which of the two is correct depends on the replica count, and the two environments do
-  # not run the same one. See the comments in values-prod.yaml and values-staging.yaml.
+  # Enabling this requires exactly one of minAvailable / maxUnavailable -- the template fails
+  # on both or neither. Which one is correct depends on the replica count, so each overlay
+  # sets its own.
   podDisruptionBudget:
     enabled: false
 frontend:
   image:
     name: auth-portal
-    # The repository CI actually publishes to. bernetlennard/auth_portal was a hand-pushed
-    # :latest that no pipeline ever writes -- pointing the chart at it meant the cluster
-    # ran whatever was last uploaded by hand.
     repository: xxpirl2knc5/auth_portal
-    # Owned by the pipeline: the build-and-promote workflow in the auth_portal repo
-    # rewrites this line to the commit SHA it just pushed. Edit it by hand only to roll back.
-    tag: "7c5429f06c75629d526eea526544e4f16ae09ca9"
-    # IfNotPresent, not Always: the tag is an immutable commit SHA, so a pod that already
-    # has the layer can never be looking at a stale image.
+    # Owned by the promote pipeline in the auth_portal repo. Edit by hand only to roll back.
+    tag: "78f99c0e4d8ad4d31732dd28f0ed5b10a90bae97"
+    # The tag is an immutable commit SHA, so a cached layer can never be stale.
     pullPolicy: IfNotPresent
-  # No HPA for the frontend, and that is a considered choice rather than an omission:
-  # Next.js serving pre-rendered pages is not CPU-bound here, so a cpu-target autoscaler
-  # would never trigger. Availability is what matters for this component, so prod pins a
-  # fixed replica count above 1 and protects it with a PDB instead.
+  # No HPA: Next.js serving pre-rendered pages is not CPU-bound, so a cpu target would never
+  # fire. Availability is what matters here, so prod pins a fixed count above 1 plus a PDB.
   replicaCount: 1
   strategy:
     type: RollingUpdate
@@ -197,16 +151,6 @@ frontend:
   service:
     port: 3000
     nodeEnv: "production"
-  # Environment marker the frontend renders as a thin banner above the page. Read at
-  # runtime from the ConfigMap, like BACKEND_API_URL -- the image stays the same in every
-  # environment.
-  #
-  # An empty label renders NOTHING, which is why prod needs no override: the unset value
-  # fails towards the quiet, production-looking state instead of towards a stray banner.
-  # `tone` is whitelisted in the component; anything unknown falls back to `warning`.
-  environment:
-    label: ""
-    tone: warning
   resources:
     requests:
       cpu: 50m
@@ -229,9 +173,7 @@ frontend:
       initialDelaySeconds: 30
       periodSeconds: 20
       failureThreshold: 3
-  # Same switch and the same either/or rule as the backend's. Off here, on in both
-  # overlays. A PDB is only meaningful next to a replica count above 1, which is why prod
-  # and staging configure it differently.
+  # Same either/or rule as the backend's, and likewise configured per environment.
   podDisruptionBudget:
     enabled: false
 ingress:
@@ -244,24 +186,15 @@ ingress:
     enabled: true
     certResolver: letsencrypt
 
-# --- Aufgabe 5: namespace guardrails -----------------------------------------------
-# Both objects below are namespace-scoped, so each environment gets its own copy with
-# its own numbers. They ship DISABLED here on purpose: the real values live in
-# values-prod.yaml and values-staging.yaml, which is what makes the difference between
-# the environments visible in one place instead of buried in the base file.
+# Namespace guardrails. Both objects are namespace-scoped, so each environment gets its own
+# copy; they ship disabled here and the real numbers live in the two overlays.
 
 resourceQuota:
   enabled: false
-  # Anything valid in ResourceQuota.spec.hard. Sizing rule (see resourcequota.yaml):
-  #   hard.*  >=  sum over all components  +  one extra copy of every component that rolls
-  # A RollingUpdate creates the replacement before retiring the old pod, and a chart change
-  # touching every component (a cpu limit, an image tag, a checksum annotation) rolls
-  # backend and frontend at the SAME time -- budgeting for a single surge pod is not enough.
-  # Postgres is `strategy: Recreate` and never surges. Too tight a quota does not slow the
-  # rollout down, it deadlocks it at "exceeded quota".
-  # Headroom is deliberate on the limits side: Aufgabe 6 scales the backend to 4 replicas,
-  # and 4 x 1 core of limit plus the other two components already needs 4.6 cores. A quota
-  # that fits only today's three pods would make itself the thing that blocks the HPA.
+  # Anything valid in ResourceQuota.spec.hard. The ceiling has to cover the worst case:
+  # every component at its maximum replica count plus one surge pod each. Too tight does not
+  # slow a rollout down, it deadlocks it at "exceeded quota". Per-environment sums are in
+  # values-prod.yaml and values-staging.yaml.
   hard:
     requests.cpu: "1"
     requests.memory: 2Gi
@@ -272,27 +205,16 @@ resourceQuota:
 
 networkPolicy:
   enabled: false
-  # Namespace running CoreDNS. Selected by the kubernetes.io/metadata.name label, which
-  # Kubernetes maintains on every namespace itself -- no manual labelling required.
+  # Namespace running CoreDNS, selected by the kubernetes.io/metadata.name label that
+  # Kubernetes maintains on every namespace.
   dnsNamespace: kube-system
-  # Where the ingress controller lives, and how to select its pods. Only these pods may
-  # reach the frontend and the backend from outside the namespace.
+  # The only pods outside this namespace that may reach the frontend and the backend.
   ingressController:
     namespace: default
     podLabels:
       app: traefik
-  # Egress to the public internet for the frontend. OBSOLETE, and therefore off.
-  #
-  # It existed because the Next.js route handlers in app/auth/ called the PUBLIC api url
-  # that Next.js inlined into the image at build time: the pod had to leave the cluster
-  # and come back in through Traefik just to reach a backend two Services away. Now that
-  # the api address is resolved at runtime -- BACKEND_API_URL points at the in-cluster
-  # Service, and the browser calls a relative /api -- the frontend pod has no reason to
-  # talk to anything outside its own namespace.
-  #
-  # Fonts are self-hosted by next/font at build time, so nothing else needs it either.
-  # Flip back to true if a feature ever genuinely requires outbound calls; port and cidrs
-  # stay here so that remains a one-line change.
+  # Off: the frontend resolves the api in-cluster and self-hosts its fonts, so it has no
+  # reason to leave the namespace. Port and cidrs stay here in case that ever changes.
   frontendExternalEgress:
     enabled: false
     port: 443

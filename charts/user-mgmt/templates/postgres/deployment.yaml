@@ -6,7 +6,7 @@ metadata:
     {{- include "user-mgmt.labels" (dict "ctx" $ "component" "postgres") | nindent 4 }}
 spec:
   replicas: {{ .Values.postgres.replicaCount }}
-  # Defaults to Recreate -- see the comment on postgres.strategy in values.yaml.
+  # Recreate; see postgres.strategy in values.yaml.
   strategy:
     {{- toYaml .Values.postgres.strategy | nindent 4 }}
   selector:

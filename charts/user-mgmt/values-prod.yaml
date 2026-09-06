@@ -1,21 +1,13 @@
-# Overlay for the production environment (namespace `prod`).
+# Overlay for the production environment (namespace `prod`), applied by
+# argocd/application-prod.yaml on top of values.yaml.
 #
-# Applied by the ArgoCD Application argocd/application-prod.yaml, layered on top of
-# values.yaml. Prod is the more generous of the two environments: it owns the public
-# hostnames, gets the higher cpu ceilings, and it is the environment that actually runs
-# horizontally -- an autoscaled backend and a two-replica frontend, both protected by a
-# PDB. Staging stays single-replica; see values-staging.yaml for why.
+# Prod is the environment that runs horizontally: an autoscaled backend and a two-replica
+# frontend, both protected by a PDB. The per-pod resources repeat the values.yaml defaults on
+# purpose, so the difference to staging is readable in one file.
 #
-# The per-pod resources below repeat the values.yaml defaults on purpose. Stating them
-# here makes the prod/staging difference readable in one diff instead of requiring a
-# reader to merge two files in their head.
-#
-# THE BINDING CONSTRAINT IS THE NODE, NOT THE QUOTA. The cluster is a single 2 vCPU / 4 GB
-# node: 1900m / 3002Mi allocatable, of which system pods, ArgoCD and Traefik hold
-# 637m / 846Mi. That leaves 1263m / 2156Mi for both namespaces together, and memory runs
-# out long before cpu does. The full arithmetic is in docs/scaling.md; the short version is
-# that every Mi of REQUEST is a Mi the autoscaler cannot scale into, which is why the
-# requests below sit close to measured usage rather than at comfortable round numbers.
+# The binding constraint is the node, not the quota. Both namespaces share one 2 vCPU / 4 GB
+# node with 1263m / 2156Mi available to them together, and memory runs out long before cpu
+# does. See docs/scaling.md.
 
 postgres:
   resources:
@@ -35,32 +27,26 @@ backend:
       cpu: "1"
       memory: 700Mi
 
-  # minReplicas 2, not 1, and that is the HA requirement rather than a capacity choice:
-  # a single replica means every rollout, eviction and node hiccup is an outage, and a PDB
-  # over one pod can only ever block a drain instead of surviving it.
-  #
-  # maxReplicas 3 is what the node has room for. Steady state across both namespaces is
-  # 1440Mi of the 2156Mi available, leaving 716Mi: one scale-out step (320Mi) plus the one
-  # surge pod a RollingUpdate creates (320Mi) fits, a second step would not. A higher
-  # number here would not scale further, it would only produce Pending pods.
+  # minReplicas 2 is the HA requirement: with one replica every rollout and eviction is an
+  # outage. maxReplicas 3 is what the node has room for -- steady state across both namespaces
+  # is 1440Mi of 2156Mi, and the remaining 716Mi fits one scale-out step (320Mi) plus the surge
+  # pod of a rollout (320Mi), but not a second step.
   autoscaling:
     enabled: true
     minReplicas: 2
     maxReplicas: 3
     targetCPUUtilizationPercentage: 70
 
-  # minAvailable, because prod runs at least two replicas: during a node drain Kubernetes
-  # may take one away and must leave the other serving. ALLOWED DISRUPTIONS in
-  # `kubectl get pdb` therefore reads 1 -- if it ever reads 0, the PDB is blocking rather
-  # than protecting, and a drain will hang.
+  # minAvailable, because prod runs at least two replicas: a drain may take one and must leave
+  # the other serving. ALLOWED DISRUPTIONS in `kubectl get pdb` should read 1; at 0 the PDB
+  # blocks drains instead of surviving them.
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
 
 frontend:
-  # Fixed at 2 rather than autoscaled: this component is not CPU-bound, so a cpu-target
-  # HPA would never fire. Two replicas is what makes the Ingress round-robin observable
-  # on `/` as well as on `/api`, and what lets one pod go away without an outage.
+  # Two replicas: not CPU-bound, so an HPA would never fire, but a second pod makes the Ingress
+  # round-robin observable on `/` and lets one pod go away without an outage.
   replicaCount: 2
   resources:
     requests:
@@ -73,13 +59,8 @@ frontend:
     enabled: true
     minAvailable: 1
 
-# Namespace ceiling for `prod`.
-#
-# The quota must clear the WORST CASE, not the steady state. Worst case here is the
-# autoscaler at maxReplicas WHILE a rollout is in flight: each RollingUpdate creates its
-# replacement before retiring the old pod (maxSurge 1, maxUnavailable 0), so backend can
-# briefly be 3 + 1 = 4 pods and frontend 2 + 1 = 3. Postgres is `strategy: Recreate` and
-# never surges.
+# Namespace ceiling for `prod`. Worst case is the autoscaler at maxReplicas during a rollout:
+# backend 3 + 1 surge = 4 pods, frontend 2 + 1 = 3, postgres 1 (Recreate, never surges).
 #
 #   pods            = 4 backend + 3 frontend + 1 postgres          =    8
 #   requests.cpu    =  50m + 4x100m + 3x50m                        =  600m
@@ -87,12 +68,8 @@ frontend:
 #   limits.cpu      = 300m + 4x1000m + 3x300m                      = 5200m
 #   limits.memory   = 256Mi + 4x700Mi + 3x256Mi                    = 3824Mi
 #
-# Every number below clears that with room to spare, deliberately: a quota that fits only
-# the current replica count makes ITSELF the scaling limit, and the failure mode is not a
-# throttled rollout but a deadlocked one -- the ReplicaSet sits at "exceeded quota" until
-# someone raises the number. The node runs out of schedulable memory before these ceilings
-# are reached, which is the correct order: capacity should be enforced by what exists, and
-# the quota is the guard rail behind it.
+# The numbers below clear that with room to spare: the node should be what runs out first, so
+# the quota stays a guard rail rather than becoming the scaling limit itself.
 resourceQuota:
   enabled: true
   hard:
@@ -103,10 +80,7 @@ resourceQuota:
     pods: "12"
     persistentvolumeclaims: "2"
 
-# Deny-by-default networking; see templates/networkpolicy.yaml for the five objects
-# this switch creates. Selector values are inherited from values.yaml.
-#
-# Nothing here needs adjusting for horizontal scaling: every rule selects pods by label,
-# so a new replica is covered by the same policies the moment it starts.
+# Deny-by-default networking; see templates/networkpolicy.yaml. Selector values are inherited
+# from values.yaml. Every rule selects pods by label, so new replicas are covered automatically.
 networkPolicy:
   enabled: true

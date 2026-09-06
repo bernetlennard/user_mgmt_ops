@@ -6,11 +6,9 @@ metadata:
     {{- include "user-mgmt.labels" (dict "ctx" $ "component" "backend") | nindent 4 }}
 spec:
   {{- if not .Values.backend.autoscaling.enabled }}
-  # Omitted entirely when an HPA owns this Deployment, and that omission is the whole
-  # point. ArgoCD runs with selfHeal: true -- if `replicas: 1` stayed in the rendered
-  # manifest, every scale-out by the HPA would look like drift and be reverted within the
-  # reconcile interval. A field that is absent from the desired state is not diffed, so
-  # the two controllers stop fighting over it.
+  # Omitted while an HPA owns this Deployment. ArgoCD runs with selfHeal: true, so a
+  # `replicas` in the desired state would make every scale-out look like drift and be
+  # reverted; an absent field is not diffed.
   replicas: {{ .Values.backend.replicaCount }}
   {{- end }}
   strategy:
@@ -21,8 +19,8 @@ spec:
   template:
     metadata:
       annotations:
-        # Change a ConfigMap value -> this hash changes -> the pod template changes
-        # -> the pod restarts and picks it up. `kubectl apply` never does this.
+        # A changed ConfigMap changes this hash, which changes the pod template and rolls
+        # the pods so they pick the new value up.
         checksum/config: {{ include (print $.Template.BasePath "/backend/configmap.yaml") . | sha256sum }}
       labels:
         {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 8 }}
@@ -34,9 +32,8 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.backend.service.port }}
-            # Actuator. Declared for documentation only -- no Service and no Ingress
-            # reference it, which is exactly what keeps /actuator off the public hostname.
-            # The kubelet reaches it directly on the pod IP to run the probes below.
+            # Actuator, declared for documentation only: no Service or Ingress references it,
+            # and the kubelet reaches it on the pod IP to run the probes below.
             - name: management
               containerPort: {{ .Values.backend.management.port }}
           env:
@@ -45,16 +42,13 @@ spec:
                 configMapKeyRef:
                   name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
                   key: POSTGRES_DB
-            # THE POINT OF THE WHOLE EXERCISE.
-            # Was: jdbc:postgresql://postgres:5432/$(POSTGRES_DB)
-            # -- which only worked because the Service happened to be named exactly
-            # `postgres`. Now that names are release-prefixed, that would break.
+            # Built from the release-prefixed Service name, so each release reaches its own
+            # database.
             - name: SPRING_DATASOURCE_URL
               value: {{ include "user-mgmt.postgres.jdbcUrl" $ | quote }}
-            # Wired one by one rather than with envFrom, because the names have to change
-            # on the way in: the credentials live in the Postgres Secret under POSTGRES_*
-            # (shared with the Postgres pod) but application.properties reads them as
-            # SPRING_DATASOURCE_*. envFrom cannot rename keys.
+            # Wired key by key rather than with envFrom: the credentials live in the Postgres
+            # Secret as POSTGRES_* but Spring reads them as SPRING_DATASOURCE_*, and envFrom
+            # cannot rename keys.
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -73,8 +67,7 @@ spec:
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
           {{- with .Values.backend.probes.startup }}
-          # Suspends the other two probes until it succeeds once, so a slow JVM start is
-          # never mistaken for a hung process.
+          # Suspends the other two probes until it succeeds once.
           startupProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
