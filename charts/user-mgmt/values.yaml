@@ -94,7 +94,7 @@ frontend:
     repository: xxpirl2knc5/auth_portal
     # Owned by the pipeline: the build-and-promote workflow in the auth_portal repo
     # rewrites this line to the commit SHA it just pushed. Edit it by hand only to roll back.
-    tag: "6091b0a58e073b0a127c813359abfdde3f37822c"
+    tag: "1e1237d27b037bc24745cd71a872974e9dff5e95"
     # IfNotPresent, not Always: the tag is an immutable commit SHA, so a pod that already
     # has the layer can never be looking at a stale image.
     pullPolicy: IfNotPresent
