@@ -29,6 +29,10 @@ spec:
                 name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "frontend") }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+          {{- with .Values.frontend.probes.startup }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             {{- toYaml .Values.frontend.probes.readiness | nindent 12 }}
           livenessProbe:

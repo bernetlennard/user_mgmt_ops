@@ -1,8 +1,15 @@
 # Overlay for the staging environment (namespace `staging`).
 #
 # Applied by the ArgoCD Application argocd/application-staging.yaml, layered on top of
-# values.yaml. Staging is the tighter of the two environments: no public ingress, lower
-# cpu ceilings, a smaller namespace quota.
+# values.yaml. Staging is the tighter of the two environments: lower cpu ceilings, a
+# smaller namespace quota, and single-replica components.
+#
+# That last point is a capacity decision, not an oversight. Both namespaces share one
+# 2 vCPU / 4 GB node with 1263m / 2156Mi available to them together (see values-prod.yaml
+# and docs/scaling.md). Prod is the environment that has to demonstrate high availability,
+# so prod gets the replicas; staging keeps just enough to prove the same chart renders and
+# runs. Giving staging a second frontend replica would consume exactly the headroom that
+# prod's autoscaler needs to take its scale-out step.
 
 # Staging has its own public hostname, served by the same Traefik as prod.
 #
@@ -25,18 +32,18 @@ postgres:
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 96Mi
     limits:
       cpu: 200m
       memory: 256Mi
 
 backend:
   # 750m instead of prod's 1 core. Still comfortably above what JVM startup needs inside
-  # the readiness window; do not drop this to 500m or below or the rollout starts to flap.
+  # the startupProbe window; do not drop this to 500m or below or the rollout starts to flap.
   resources:
     requests:
       cpu: 100m
-      memory: 384Mi
+      memory: 320Mi
     limits:
       cpu: 750m
       # Memory limit stays at the prod value: the JVM sizes its heap from it
@@ -44,37 +51,62 @@ backend:
       # prod would not have.
       memory: 700Mi
 
+  # The HPA is enabled here too -- the point is that both environments run the same
+  # mechanism, not that staging carries load. It scales 1 -> 2 rather than prod's 2 -> 3,
+  # which is what the shared node has left over once prod has taken its headroom.
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 2
+    targetCPUUtilizationPercentage: 70
+
+  # maxUnavailable, NOT minAvailable -- and this is the difference that matters between
+  # the two environments. At minReplicas 1 a `minAvailable: 1` budget would permit zero
+  # voluntary disruptions: a node drain would block forever rather than complete, and
+  # `kubectl get pdb` would read ALLOWED DISRUPTIONS 0. Phrased as "at most one may go at
+  # a time", the same intent still lets maintenance proceed.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
 frontend:
+  # One replica: staging is the preview environment, prod is the HA one. See the header.
+  replicaCount: 1
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 96Mi
     limits:
       cpu: 200m
       memory: 256Mi
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
 
 # Namespace ceiling for `staging`.
 #
-# Arithmetic behind the numbers, with the limits set above:
-#   steady state limits   = 200m + 750m + 200m  = 1150m cpu / 1212Mi memory
-#   steady state requests =  50m + 100m +  50m  =  200m cpu /  640Mi memory
+# Worst case is the autoscaler at maxReplicas WHILE a rollout is in flight -- each
+# RollingUpdate creates its replacement before retiring the old pod (maxSurge 1,
+# maxUnavailable 0), so backend can briefly be 2 + 1 = 3 pods and frontend 1 + 1 = 2.
+# Postgres is `strategy: Recreate` and never surges.
 #
-# The ceiling has to clear the WORST CASE, not the steady state: a chart change that
-# touches every component (a cpu limit, an image tag, a checksum annotation) rolls
-# backend and frontend at the same time, and each RollingUpdate creates its replacement
-# before retiring the old pod. Postgres is `strategy: Recreate`, so it never surges.
-#   worst case limits   = 1150m + 750m + 200m = 2100m cpu / 2168Mi memory
-#   worst case requests =  200m + 100m +  50m =  350m cpu / 1152Mi memory
-#   worst case pods     = 3 + 2                = 5
-# A quota sized to the steady state alone does not slow that rollout down -- it
-# deadlocks it, and the Deployment sits at "exceeded quota" until someone notices.
+#   pods            = 3 backend + 2 frontend + 1 postgres      =    6
+#   requests.cpu    =  50m + 3x100m + 2x50m                    =  450m
+#   requests.memory =  96Mi + 3x320Mi + 2x96Mi                 = 1248Mi
+#   limits.cpu      = 200m + 3x750m + 2x200m                   = 2850m
+#   limits.memory   = 256Mi + 3x700Mi + 2x256Mi                = 2868Mi
+#
+# limits.memory is the number that moved for Aufgabe 6: at 2560Mi the quota, not the node,
+# would have been what stopped the autoscaler -- and a quota-blocked scale-out fails
+# silently, as "exceeded quota" on the ReplicaSet rather than as anything visible on the
+# HPA. 3Gi clears the 2868Mi worst case.
 resourceQuota:
   enabled: true
   hard:
     requests.cpu: 600m
     requests.memory: 1536Mi
     limits.cpu: "3"
-    limits.memory: 2560Mi
+    limits.memory: 3Gi
     pods: "8"
     persistentvolumeclaims: "2"
 

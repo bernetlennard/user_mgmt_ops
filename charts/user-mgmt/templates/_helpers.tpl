@@ -69,6 +69,54 @@ LoadBalancer and back in, and the NetworkPolicy already allows frontend -> backe
 {{- end }}
 
 {{/*
+PodDisruptionBudget for one component (Aufgabe 6). One definition serves backend and
+frontend: (dict "ctx" $ "component" "backend").
+
+A PDB caps how many pods may be taken away by VOLUNTARY disruption -- a node drain, a
+re-schedule -- and has no say over a crash or an OOM kill. The two ways to express it are
+not interchangeable:
+
+  minAvailable   "keep at least N serving". Correct when several replicas run, but on a
+                 single-replica Deployment minAvailable: 1 blocks every eviction forever
+                 and a drain hangs instead of finishing.
+  maxUnavailable "allow at most N to go at once". Correct for a single replica, because
+                 the drain can still proceed.
+
+Setting both is a contradiction and Kubernetes rejects it; setting neither renders a PDB
+that guards nothing. Both are caught here, at template time, rather than in the cluster.
+*/}}
+{{- define "user-mgmt.podDisruptionBudget" -}}
+{{- $cfg := (index .ctx.Values .component).podDisruptionBudget -}}
+{{- if $cfg.enabled -}}
+{{- $hasMin := hasKey $cfg "minAvailable" -}}
+{{- $hasMax := hasKey $cfg "maxUnavailable" -}}
+{{- if and $hasMin $hasMax -}}
+{{- fail (printf "%s.podDisruptionBudget: set either minAvailable or maxUnavailable, not both" .component) -}}
+{{- end -}}
+{{- if not (or $hasMin $hasMax) -}}
+{{- fail (printf "%s.podDisruptionBudget: enabled requires one of minAvailable or maxUnavailable" .component) -}}
+{{- end -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "user-mgmt.componentName" . }}-pdb
+  labels:
+    {{- include "user-mgmt.labels" . | nindent 4 }}
+spec:
+  # Must be THIS component's selector labels -- a PDB that selects nothing is silently
+  # accepted by the API server and protects nothing.
+  selector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" . | nindent 6 }}
+  {{- if $hasMin }}
+  minAvailable: {{ $cfg.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ $cfg.maxUnavailable }}
+  {{- end }}
+{{- end -}}
+{{- end }}
+
+{{/*
 Kills the hardcoded jdbc:postgresql://postgres:5432/ in the original manifest.
 $(POSTGRES_DB) is left literal ON PURPOSE -- Kubernetes expands it, not Helm.
 */}}

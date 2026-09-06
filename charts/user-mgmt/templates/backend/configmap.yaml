@@ -10,3 +10,7 @@ data:
   SPRING_JPA_HIBERNATE_DDL_AUTO: {{ .Values.backend.config.ddlAuto | quote }}
   SERVER_SERVLET_CONTEXT_PATH: {{ .Values.backend.config.contextPath | quote }}
   JAVA_TOOL_OPTIONS: {{ .Values.backend.config.javaToolOptions | quote }}
+  # Actuator's port. Kept in step with the containerPort and the three probes, which all
+  # read the same value from backend.management.port. Note the management context does not
+  # inherit SERVER_SERVLET_CONTEXT_PATH, so the probe paths carry no /api prefix.
+  MANAGEMENT_SERVER_PORT: {{ .Values.backend.management.port | quote }}

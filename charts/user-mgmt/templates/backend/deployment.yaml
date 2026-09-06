@@ -5,7 +5,14 @@ metadata:
   labels:
     {{- include "user-mgmt.labels" (dict "ctx" $ "component" "backend") | nindent 4 }}
 spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
+  # Omitted entirely when an HPA owns this Deployment, and that omission is the whole
+  # point. ArgoCD runs with selfHeal: true -- if `replicas: 1` stayed in the rendered
+  # manifest, every scale-out by the HPA would look like drift and be reverted within the
+  # reconcile interval. A field that is absent from the desired state is not diffed, so
+  # the two controllers stop fighting over it.
   replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
   strategy:
     {{- toYaml .Values.backend.strategy | nindent 4 }}
   selector:
@@ -25,7 +32,13 @@ spec:
           image: {{ include "user-mgmt.image" .Values.backend.image | quote }}
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           ports:
-            - containerPort: {{ .Values.backend.service.port }}
+            - name: http
+              containerPort: {{ .Values.backend.service.port }}
+            # Actuator. Declared for documentation only -- no Service and no Ingress
+            # reference it, which is exactly what keeps /actuator off the public hostname.
+            # The kubelet reaches it directly on the pod IP to run the probes below.
+            - name: management
+              containerPort: {{ .Values.backend.management.port }}
           env:
             - name: POSTGRES_DB
               valueFrom:
@@ -59,6 +72,12 @@ spec:
                 name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+          {{- with .Values.backend.probes.startup }}
+          # Suspends the other two probes until it succeeds once, so a slow JVM start is
+          # never mistaken for a hung process.
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             {{- toYaml .Values.backend.probes.readiness | nindent 12 }}
           livenessProbe:

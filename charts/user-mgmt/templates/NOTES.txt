@@ -25,7 +25,22 @@ The Ingress is DISABLED for this release. Reach it directly:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }} {{ .Values.backend.service.port }}:{{ .Values.backend.service.port }}
 {{- end }}
 
-{{ if not .Values.backend.autoscaling.enabled -}}
-Note: backend.autoscaling and backend.podDisruptionBudget are disabled (Aufgabe 6 keys,
-shipped early so enabling them is a values change, not a chart change).
+{{ if .Values.backend.autoscaling.enabled -}}
+The backend is autoscaled: {{ .Values.backend.autoscaling.minReplicas }} to {{ .Values.backend.autoscaling.maxReplicas }} replicas at {{ .Values.backend.autoscaling.targetCPUUtilizationPercentage }}% cpu.
+
+  kubectl -n {{ .Release.Namespace }} get hpa,pdb
+  kubectl -n {{ .Release.Namespace }} describe quota
+
+TARGETS showing <unknown> means metrics-server is not answering, not that the load is
+zero. A scale-out that never happens despite high cpu is usually the ResourceQuota, and it
+says so on the ReplicaSet, not on the HPA:
+
+  kubectl -n {{ .Release.Namespace }} describe rs -l app.kubernetes.io/component=backend | grep -i quota
+
+Note that spec.replicas is intentionally absent from the backend Deployment while the HPA
+is enabled -- that is what stops ArgoCD's selfHeal from reverting every scale-out.
+{{- else -}}
+Note: backend.autoscaling is disabled for this release, so the Deployment carries a fixed
+spec.replicas ({{ .Values.backend.replicaCount }}). Enable it per environment in
+values-prod.yaml / values-staging.yaml, not here.
 {{- end }}

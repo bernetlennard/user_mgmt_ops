@@ -2,18 +2,26 @@
 #
 # Applied by the ArgoCD Application argocd/application-prod.yaml, layered on top of
 # values.yaml. Prod is the more generous of the two environments: it owns the public
-# hostnames, gets the higher cpu ceilings, and has quota headroom for the horizontal
-# scaling that Aufgabe 6 adds.
+# hostnames, gets the higher cpu ceilings, and it is the environment that actually runs
+# horizontally -- an autoscaled backend and a two-replica frontend, both protected by a
+# PDB. Staging stays single-replica; see values-staging.yaml for why.
 #
 # The per-pod resources below repeat the values.yaml defaults on purpose. Stating them
 # here makes the prod/staging difference readable in one diff instead of requiring a
 # reader to merge two files in their head.
+#
+# THE BINDING CONSTRAINT IS THE NODE, NOT THE QUOTA. The cluster is a single 2 vCPU / 4 GB
+# node: 1900m / 3002Mi allocatable, of which system pods, ArgoCD and Traefik hold
+# 637m / 846Mi. That leaves 1263m / 2156Mi for both namespaces together, and memory runs
+# out long before cpu does. The full arithmetic is in docs/scaling.md; the short version is
+# that every Mi of REQUEST is a Mi the autoscaler cannot scale into, which is why the
+# requests below sit close to measured usage rather than at comfortable round numbers.
 
 postgres:
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 96Mi
     limits:
       cpu: 300m
       memory: 256Mi
@@ -22,35 +30,69 @@ backend:
   resources:
     requests:
       cpu: 100m
-      memory: 384Mi
+      memory: 320Mi
     limits:
       cpu: "1"
       memory: 700Mi
 
+  # minReplicas 2, not 1, and that is the HA requirement rather than a capacity choice:
+  # a single replica means every rollout, eviction and node hiccup is an outage, and a PDB
+  # over one pod can only ever block a drain instead of surviving it.
+  #
+  # maxReplicas 3 is what the node has room for. Steady state across both namespaces is
+  # 1440Mi of the 2156Mi available, leaving 716Mi: one scale-out step (320Mi) plus the one
+  # surge pod a RollingUpdate creates (320Mi) fits, a second step would not. A higher
+  # number here would not scale further, it would only produce Pending pods.
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+
+  # minAvailable, because prod runs at least two replicas: during a node drain Kubernetes
+  # may take one away and must leave the other serving. ALLOWED DISRUPTIONS in
+  # `kubectl get pdb` therefore reads 1 -- if it ever reads 0, the PDB is blocking rather
+  # than protecting, and a drain will hang.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
 frontend:
+  # Fixed at 2 rather than autoscaled: this component is not CPU-bound, so a cpu-target
+  # HPA would never fire. Two replicas is what makes the Ingress round-robin observable
+  # on `/` as well as on `/api`, and what lets one pod go away without an outage.
+  replicaCount: 2
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 96Mi
     limits:
       cpu: 300m
       memory: 256Mi
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
 
 # Namespace ceiling for `prod`.
 #
-# Arithmetic behind the numbers, with the limits set above:
-#   steady state limits   = 300m + 1000m + 300m = 1600m cpu / 1212Mi memory
-#   steady state requests =  50m +  100m +  50m =  200m cpu /  640Mi memory
-# Worst case, when a chart change rolls backend and frontend at the same time (each
-# RollingUpdate creates its replacement before retiring the old pod; Postgres is
-# `strategy: Recreate` and never surges):
-#   worst case limits   = 1600m + 1000m + 300m = 2900m cpu / 2168Mi memory
-#   worst case requests =  200m +  100m +  50m =  350m cpu / 1152Mi memory
+# The quota must clear the WORST CASE, not the steady state. Worst case here is the
+# autoscaler at maxReplicas WHILE a rollout is in flight: each RollingUpdate creates its
+# replacement before retiring the old pod (maxSurge 1, maxUnavailable 0), so backend can
+# briefly be 3 + 1 = 4 pods and frontend 2 + 1 = 3. Postgres is `strategy: Recreate` and
+# never surges.
 #
-# The limits ceiling is set well above that surge figure because Aufgabe 6 scales the
-# backend to 4 replicas: 4 x 1 core + 600m for the other two = 4600m, and
-# 4 x 700Mi + 512Mi = 3312Mi. Sizing the quota to today's three pods would make the
-# quota, rather than the node, the thing that blocks the HPA.
+#   pods            = 4 backend + 3 frontend + 1 postgres          =    8
+#   requests.cpu    =  50m + 4x100m + 3x50m                        =  600m
+#   requests.memory =  96Mi + 4x320Mi + 3x96Mi                     = 1664Mi
+#   limits.cpu      = 300m + 4x1000m + 3x300m                      = 5200m
+#   limits.memory   = 256Mi + 4x700Mi + 3x256Mi                    = 3824Mi
+#
+# Every number below clears that with room to spare, deliberately: a quota that fits only
+# the current replica count makes ITSELF the scaling limit, and the failure mode is not a
+# throttled rollout but a deadlocked one -- the ReplicaSet sits at "exceeded quota" until
+# someone raises the number. The node runs out of schedulable memory before these ceilings
+# are reached, which is the correct order: capacity should be enforced by what exists, and
+# the quota is the guard rail behind it.
 resourceQuota:
   enabled: true
   hard:
@@ -63,5 +105,8 @@ resourceQuota:
 
 # Deny-by-default networking; see templates/networkpolicy.yaml for the five objects
 # this switch creates. Selector values are inherited from values.yaml.
+#
+# Nothing here needs adjusting for horizontal scaling: every rule selects pods by label,
+# so a new replica is covered by the same policies the moment it starts.
 networkPolicy:
   enabled: true

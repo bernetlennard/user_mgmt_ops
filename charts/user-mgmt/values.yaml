@@ -22,10 +22,15 @@ postgres:
   # The cpu limit is mandatory, not tuning: the namespace ResourceQuota (Aufgabe 5)
   # declares limits.cpu, and Kubernetes rejects every pod in that namespace that does
   # not declare one of its own. Same reasoning for the other two components.
+  #
+  # The memory REQUEST is what the scheduler reserves, and it is the scarce number on a
+  # single-node cluster -- every Mi requested here is a Mi the backend cannot scale into.
+  # 96Mi against a measured 44Mi RSS is roughly 2x headroom; see docs/scaling.md for the
+  # node budget this comes out of.
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 96Mi
     limits:
       cpu: 300m
       memory: 256Mi
@@ -50,11 +55,30 @@ backend:
     # IfNotPresent, not Always: the tag is an immutable commit SHA, so a pod that already
     # has the layer can never be looking at a stale image.
     pullPolicy: IfNotPresent
+  # Only consulted when autoscaling is DISABLED. With an HPA present the Deployment
+  # template omits spec.replicas entirely -- see templates/backend/deployment.yaml for
+  # why that omission is load-bearing rather than cosmetic.
   replicaCount: 1
+  # maxUnavailable: 0 is the "no service interruption" half of Aufgabe 6: the replacement
+  # pod must be Ready before any old pod is taken away, so the number of serving pods
+  # never dips below the desired count. maxSurge: 1 is the price -- exactly one extra pod
+  # for the duration of the rollout, which is what the ResourceQuota and the node budget
+  # in docs/scaling.md are sized for.
   strategy:
     type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   service:
     port: 8080
+  # Actuator's port. Deliberately NOT the service port: the Ingress routes the whole /api
+  # prefix from the internet to the backend Service, so an Actuator on 8080 would publish
+  # /api/actuator/health on the public hostname. 8081 appears in no Service and in no
+  # Ingress -- only the kubelet, probing the pod IP from the node, reaches it.
+  #
+  # The anchor is referenced by all three probes below so the port is stated once.
+  management:
+    port: &backendManagementPort 8081
   config:
     jwtIssuer: user-mgmt-service
     jwtExpirationMillis: 3600000
@@ -64,35 +88,89 @@ backend:
   # HS256 signing key, 512 bit. Committed here because this repo is private -- see the
   # "Secrets" section in README.md for why that is a deliberate simplification.
   jwtSecret: "VIJQAsGSlarKapEGDwf1MgTiTIzvQJPEktgdisQeuRzjeUu1srpGNpbfhdnUPSZXYduiUAkNbMnKdQShQ7mFXw=="
-  # 1 core, deliberately generous: a cpu limit throttles JVM startup, and the readiness
-  # probe only allows 20s + 6x5s before the rollout is considered failed. Limits are
-  # ceilings, not reservations -- an idle pod costs nothing for having a high one.
+  # 1 core of LIMIT, deliberately generous: a cpu limit throttles JVM startup, and a
+  # throttled start is a slow start. Limits are ceilings, not reservations -- an idle pod
+  # costs nothing for having a high one.
+  #
+  # The cpu REQUEST is a different matter entirely, because the HPA measures utilisation
+  # against it: at 100m request and a 70% target, the backend scales out once a pod is
+  # sustaining ~70m. Raising this number makes the autoscaler less eager, lowering it
+  # makes it twitchier -- it is the HPA's sensitivity dial, not just a scheduling hint.
+  #
+  # The memory request is 320Mi against a measured 252Mi RSS. It is deliberately close:
+  # on a single-node cluster every requested Mi is one the autoscaler cannot scale into.
+  # The arithmetic is in docs/scaling.md.
   resources:
     requests:
       cpu: 100m
-      memory: 384Mi
+      memory: 320Mi
     limits:
       cpu: "1"
       memory: 700Mi
+  # All three probes hit Spring Boot Actuator on the management port, never the service
+  # port. The previous tcpSocket check called a pod "ready" the moment Tomcat bound its
+  # socket, which says nothing about the datasource behind it.
   probes:
-    readiness:
-      tcpSocket: { port: 8080 }
-      initialDelaySeconds: 20
+    # The startupProbe is what makes the other two safe to tighten. While it runs,
+    # readiness and liveness are suspended entirely -- so a slow JVM start cannot be
+    # mistaken for a hung process. 30 x 5s = 150s of grace; after that the container is
+    # restarted, which is the correct answer for a start that never finishes.
+    startup:
+      httpGet:
+        path: /actuator/health/liveness
+        port: *backendManagementPort
       periodSeconds: 5
-      failureThreshold: 6
+      failureThreshold: 30
+      timeoutSeconds: 3
+    # Readiness governs Service membership: fail it and the pod is removed from the
+    # EndpointSlice, so neither Traefik nor the frontend routes to it. The readiness group
+    # includes the `db` indicator (configured in the application), so a pod that has lost
+    # Postgres stops receiving traffic instead of accepting requests it cannot serve.
+    # No initialDelaySeconds -- that is the startupProbe's job now.
+    readiness:
+      httpGet:
+        path: /actuator/health/readiness
+        port: *backendManagementPort
+      periodSeconds: 5
+      failureThreshold: 3
+      timeoutSeconds: 3
+    # Liveness governs restarts, so it must react to a broken PROCESS and to nothing else.
+    # It checks livenessState, which does not include the database on purpose: a Postgres
+    # outage must not turn into a cluster-wide restart loop of the backend.
     liveness:
-      tcpSocket: { port: 8080 }
-      initialDelaySeconds: 60
+      httpGet:
+        path: /actuator/health/liveness
+        port: *backendManagementPort
       periodSeconds: 20
       failureThreshold: 3
-  autoscaling: # <-- Aufgabe 6, shipped disabled
+      timeoutSeconds: 3
+  # --- Aufgabe 6: horizontal scaling ------------------------------------------------
+  # Off here, on in both environment overlays -- same pattern as resourceQuota and
+  # networkPolicy below. The base file stays installable on its own; the numbers that
+  # actually differ between staging and prod live in one place per environment.
+  autoscaling:
     enabled: false
     minReplicas: 1
-    maxReplicas: 4
+    maxReplicas: 2
+    # Utilisation is relative to the cpu REQUEST above, not to the limit. 70% of 100m.
     targetCPUUtilizationPercentage: 70
-  podDisruptionBudget: # <-- Aufgabe 6, shipped disabled
+    # Deliberately CPU only. A memory-based HPA on a JVM never scales back down: the heap
+    # is not returned to the OS once grown, so the metric would stay high forever.
+    behavior:
+      scaleUp:
+        # React immediately. The default 0s is stated explicitly because it is a choice:
+        # load arrives faster than a JVM starts, so there is nothing to gain from waiting.
+        stabilizationWindowSeconds: 0
+      scaleDown:
+        # Five minutes of sustained calm before giving a replica back. Scaling down early
+        # is how an autoscaler ends up flapping.
+        stabilizationWindowSeconds: 300
+  # Enabling this REQUIRES setting exactly one of minAvailable / maxUnavailable, and the
+  # template refuses to render if you set both or neither. Neither is set here on purpose:
+  # which of the two is correct depends on the replica count, and the two environments do
+  # not run the same one. See the comments in values-prod.yaml and values-staging.yaml.
+  podDisruptionBudget:
     enabled: false
-    minAvailable: 1
 frontend:
   image:
     name: auth-portal
@@ -106,16 +184,23 @@ frontend:
     # IfNotPresent, not Always: the tag is an immutable commit SHA, so a pod that already
     # has the layer can never be looking at a stale image.
     pullPolicy: IfNotPresent
+  # No HPA for the frontend, and that is a considered choice rather than an omission:
+  # Next.js serving pre-rendered pages is not CPU-bound here, so a cpu-target autoscaler
+  # would never trigger. Availability is what matters for this component, so prod pins a
+  # fixed replica count above 1 and protects it with a PDB instead.
   replicaCount: 1
   strategy:
     type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   service:
     port: 3000
     nodeEnv: "production"
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 96Mi
     limits:
       cpu: 300m
       memory: 256Mi
@@ -134,6 +219,11 @@ frontend:
       initialDelaySeconds: 30
       periodSeconds: 20
       failureThreshold: 3
+  # Same switch and the same either/or rule as the backend's. Off here, on in both
+  # overlays. A PDB is only meaningful next to a replica count above 1, which is why prod
+  # and staging configure it differently.
+  podDisruptionBudget:
+    enabled: false
 ingress:
   enabled: true
   className: traefik

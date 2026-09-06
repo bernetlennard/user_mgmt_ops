@@ -1,0 +1,1 @@
+{{- include "user-mgmt.podDisruptionBudget" (dict "ctx" $ "component" "frontend") }}
