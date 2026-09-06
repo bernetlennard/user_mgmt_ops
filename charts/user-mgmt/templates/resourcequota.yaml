@@ -1,0 +1,27 @@
+{{- if .Values.resourceQuota.enabled }}
+# ResourceQuota is namespace-scoped: it caps the SUM of requests and limits across every
+# pod in the namespace this release is installed into. That is what makes each
+# environment's resource ceiling binding rather than advisory (Aufgabe 5).
+#
+# Consequence worth knowing before you touch the numbers: because this quota names
+# limits.cpu and limits.memory, Kubernetes requires EVERY container in the namespace to
+# declare both -- a pod without a cpu limit is rejected at admission, not throttled.
+# That is why values.yaml gives all three components an explicit cpu limit.
+#
+# Sizing rule: the quota must cover the WORST CASE, not the steady state. A chart change
+# that touches every component rolls backend and frontend at the same time, and each
+# RollingUpdate creates its replacement before retiring the old pod -- so the ceiling has
+# to fit the steady state plus one extra copy of every component that rolls. A quota that
+# only fits the steady state does not slow the rollout down; it deadlocks it, and the
+# Deployment sits at "exceeded quota" until someone raises the number. The per-environment
+# arithmetic is written out in values-prod.yaml and values-staging.yaml.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "user-mgmt.fullname" . }}-quota
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "quota") | nindent 4 }}
+spec:
+  hard:
+    {{- toYaml .Values.resourceQuota.hard | nindent 4 }}
+{{- end }}

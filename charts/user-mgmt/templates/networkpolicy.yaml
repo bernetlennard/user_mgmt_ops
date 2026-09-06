@@ -1,0 +1,165 @@
+{{- if .Values.networkPolicy.enabled }}
+# Network isolation for this namespace (Aufgabe 5).
+#
+# The model is deny-by-default plus one allow policy per component. NetworkPolicies are
+# additive: a pod is isolated the moment ANY policy selects it, and the union of all
+# matching policies is what it may do. So the first policy below isolates everything,
+# and the rest hand back exactly the paths the application needs.
+#
+# What this buys: a pod in `staging` cannot open a connection to a pod in `prod` and vice
+# versa, because neither namespace's allow rules name the other. Traffic is dropped, not
+# refused -- a blocked connection times out rather than failing fast, which is what you
+# should expect when testing it.
+#
+# Requires a CNI that enforces NetworkPolicy. This cluster runs Cilium (DOKS default).
+---
+# 1. Deny everything, both directions, for every pod in the namespace.
+#    podSelector: {} deliberately covers pods this chart does not own too -- the
+#    namespace is a boundary, not just this release.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "user-mgmt.fullname" . }}-default-deny
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "netpol") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# 2. DNS. Without this every name lookup fails, which looks like a broken app rather
+#    than a network policy -- it is the single most common way to get this wrong.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "user-mgmt.fullname" . }}-allow-dns
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "netpol") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# 3. Frontend: reachable from the ingress controller only; may talk to the backend
+#    Service and out to the internet.
+#
+#    The internet rule is not optional: the Next.js route handlers under app/auth/ run
+#    server-side and fetch NEXT_PUBLIC_API_URL, which is the PUBLIC url baked into the
+#    image at build time. The pod therefore leaves the cluster and comes back in through
+#    Traefik to reach the API. See the guide's Anhang -- this is also why staging's
+#    frontend talks to prod's backend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "user-mgmt.fullname" . }}-allow-frontend
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "netpol") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressController.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.podLabels | nindent 14 }}
+      ports:
+        - port: {{ .Values.frontend.service.port }}
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 14 }}
+      ports:
+        - port: {{ .Values.backend.service.port }}
+          protocol: TCP
+    {{- if .Values.networkPolicy.frontendExternalEgress.enabled }}
+    - to:
+        {{- range .Values.networkPolicy.frontendExternalEgress.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: {{ .Values.networkPolicy.frontendExternalEgress.port }}
+          protocol: TCP
+    {{- end }}
+---
+# 4. Backend: reachable from the ingress controller (the /api path) and from the
+#    frontend; may talk to Postgres. No internet egress -- it needs none.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "user-mgmt.fullname" . }}-allow-backend
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "netpol") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressController.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.podLabels | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 14 }}
+      ports:
+        - port: {{ .Values.backend.service.port }}
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 14 }}
+      ports:
+        - port: {{ .Values.postgres.service.port }}
+          protocol: TCP
+---
+# 5. Postgres: reachable from the backend in this namespace only, and from nowhere else.
+#    No egress rule beyond the shared DNS policy -- the database initiates nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "user-mgmt.fullname" . }}-allow-postgres
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "netpol") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 14 }}
+      ports:
+        - port: {{ .Values.postgres.service.port }}
+          protocol: TCP
+{{- end }}

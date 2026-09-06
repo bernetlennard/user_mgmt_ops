@@ -19,11 +19,15 @@ postgres:
     enabled: true
     size: 1Gi
     accessMode: ReadWriteOnce
+  # The cpu limit is mandatory, not tuning: the namespace ResourceQuota (Aufgabe 5)
+  # declares limits.cpu, and Kubernetes rejects every pod in that namespace that does
+  # not declare one of its own. Same reasoning for the other two components.
   resources:
     requests:
       cpu: 50m
       memory: 128Mi
     limits:
+      cpu: 300m
       memory: 256Mi
   probes:
     readiness:
@@ -60,11 +64,15 @@ backend:
   # HS256 signing key, 512 bit. Committed here because this repo is private -- see the
   # "Secrets" section in README.md for why that is a deliberate simplification.
   jwtSecret: "VIJQAsGSlarKapEGDwf1MgTiTIzvQJPEktgdisQeuRzjeUu1srpGNpbfhdnUPSZXYduiUAkNbMnKdQShQ7mFXw=="
+  # 1 core, deliberately generous: a cpu limit throttles JVM startup, and the readiness
+  # probe only allows 20s + 6x5s before the rollout is considered failed. Limits are
+  # ceilings, not reservations -- an idle pod costs nothing for having a high one.
   resources:
     requests:
       cpu: 100m
       memory: 384Mi
     limits:
+      cpu: "1"
       memory: 700Mi
   probes:
     readiness:
@@ -109,6 +117,7 @@ frontend:
       cpu: 50m
       memory: 128Mi
     limits:
+      cpu: 300m
       memory: 256Mi
   probes:
     readiness:
@@ -134,3 +143,49 @@ ingress:
   tls:
     enabled: true
     certResolver: letsencrypt
+
+# --- Aufgabe 5: namespace guardrails -----------------------------------------------
+# Both objects below are namespace-scoped, so each environment gets its own copy with
+# its own numbers. They ship DISABLED here on purpose: the real values live in
+# values-prod.yaml and values-staging.yaml, which is what makes the difference between
+# the environments visible in one place instead of buried in the base file.
+
+resourceQuota:
+  enabled: false
+  # Anything valid in ResourceQuota.spec.hard. Sizing rule (see resourcequota.yaml):
+  #   limits.*   >= sum of all component limits   + one surge backend pod
+  #   requests.* >= sum of all component requests + one surge backend pod
+  # because a RollingUpdate starts the replacement pod before retiring the old one.
+  # Headroom is deliberate on the limits side: Aufgabe 6 scales the backend to 4 replicas,
+  # and 4 x 1 core of limit plus the other two components already needs 4.6 cores. A quota
+  # that fits only today's three pods would make itself the thing that blocks the HPA.
+  hard:
+    requests.cpu: "1"
+    requests.memory: 2Gi
+    limits.cpu: "6"
+    limits.memory: 4Gi
+    pods: "12"
+    persistentvolumeclaims: "2"
+
+networkPolicy:
+  enabled: false
+  # Namespace running CoreDNS. Selected by the kubernetes.io/metadata.name label, which
+  # Kubernetes maintains on every namespace itself -- no manual labelling required.
+  dnsNamespace: kube-system
+  # Where the ingress controller lives, and how to select its pods. Only these pods may
+  # reach the frontend and the backend from outside the namespace.
+  ingressController:
+    namespace: default
+    podLabels:
+      app: traefik
+  # Egress to the public internet, frontend only. Required: the Next.js route handlers
+  # in app/auth/ run server-side and call NEXT_PUBLIC_API_URL, which is the public
+  # https url baked into the image at build time -- so the pod leaves the cluster and
+  # re-enters through Traefik to reach the API.
+  # Can be tightened to the LoadBalancer address (129.212.193.64/32); left open because
+  # no in-cluster workload of ours listens on 443, so this opens no pod-to-pod path.
+  frontendExternalEgress:
+    enabled: true
+    port: 443
+    cidrs:
+      - 0.0.0.0/0

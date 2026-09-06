@@ -1,4 +1,67 @@
-# Overlay for the prod environment. values.yaml already reflects prod defaults
-# (ingress enabled, prod hostnames), so this file currently has no overrides.
-# It exists so ArgoCD's prod Application references a real per-environment
-# overlay from day one -- Aufgabe 5 will add ResourceQuota-relevant tuning here.
+# Overlay for the production environment (namespace `prod`).
+#
+# Applied by the ArgoCD Application argocd/application-prod.yaml, layered on top of
+# values.yaml. Prod is the more generous of the two environments: it owns the public
+# hostnames, gets the higher cpu ceilings, and has quota headroom for the horizontal
+# scaling that Aufgabe 6 adds.
+#
+# The per-pod resources below repeat the values.yaml defaults on purpose. Stating them
+# here makes the prod/staging difference readable in one diff instead of requiring a
+# reader to merge two files in their head.
+
+postgres:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+backend:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 700Mi
+
+frontend:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+# Namespace ceiling for `prod`.
+#
+# Arithmetic behind the numbers, with the limits set above:
+#   steady state limits   = 300m + 1000m + 300m = 1600m cpu / 1212Mi memory
+#   steady state requests =  50m +  100m +  50m =  200m cpu /  640Mi memory
+# Worst case, when a chart change rolls backend and frontend at the same time (each
+# RollingUpdate creates its replacement before retiring the old pod; Postgres is
+# `strategy: Recreate` and never surges):
+#   worst case limits   = 1600m + 1000m + 300m = 2900m cpu / 2168Mi memory
+#   worst case requests =  200m +  100m +  50m =  350m cpu / 1152Mi memory
+#
+# The limits ceiling is set well above that surge figure because Aufgabe 6 scales the
+# backend to 4 replicas: 4 x 1 core + 600m for the other two = 4600m, and
+# 4 x 700Mi + 512Mi = 3312Mi. Sizing the quota to today's three pods would make the
+# quota, rather than the node, the thing that blocks the HPA.
+resourceQuota:
+  enabled: true
+  hard:
+    requests.cpu: "1"
+    requests.memory: 2Gi
+    limits.cpu: "6"
+    limits.memory: 4Gi
+    pods: "12"
+    persistentvolumeclaims: "2"
+
+# Deny-by-default networking; see templates/networkpolicy.yaml for the five objects
+# this switch creates. Selector values are inherited from values.yaml.
+networkPolicy:
+  enabled: true

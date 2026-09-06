@@ -1,4 +1,72 @@
-# Overlay for the staging environment. Mirrors the --set ingress.enabled=false
-# override previously used for the manual `helm install um-staging` release.
+# Overlay for the staging environment (namespace `staging`).
+#
+# Applied by the ArgoCD Application argocd/application-staging.yaml, layered on top of
+# values.yaml. Staging is the tighter of the two environments: no public ingress, lower
+# cpu ceilings, a smaller namespace quota.
+
+# No Ingress object. One Traefik serves the whole cluster and owns the public hostnames;
+# staging is reached with `kubectl port-forward` instead of a second set of DNS names.
 ingress:
   enabled: false
+
+postgres:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+backend:
+  # 750m instead of prod's 1 core. Still comfortably above what JVM startup needs inside
+  # the readiness window; do not drop this to 500m or below or the rollout starts to flap.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: 750m
+      # Memory limit stays at the prod value: the JVM sizes its heap from it
+      # (-XX:MaxRAMPercentage=60), so lowering it here would risk an OOM kill that
+      # prod would not have.
+      memory: 700Mi
+
+frontend:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Namespace ceiling for `staging`.
+#
+# Arithmetic behind the numbers, with the limits set above:
+#   steady state limits   = 200m + 750m + 200m  = 1150m cpu / 1212Mi memory
+#   steady state requests =  50m + 100m +  50m  =  200m cpu /  640Mi memory
+#
+# The ceiling has to clear the WORST CASE, not the steady state: a chart change that
+# touches every component (a cpu limit, an image tag, a checksum annotation) rolls
+# backend and frontend at the same time, and each RollingUpdate creates its replacement
+# before retiring the old pod. Postgres is `strategy: Recreate`, so it never surges.
+#   worst case limits   = 1150m + 750m + 200m = 2100m cpu / 2168Mi memory
+#   worst case requests =  200m + 100m +  50m =  350m cpu / 1152Mi memory
+#   worst case pods     = 3 + 2                = 5
+# A quota sized to the steady state alone does not slow that rollout down -- it
+# deadlocks it, and the Deployment sits at "exceeded quota" until someone notices.
+resourceQuota:
+  enabled: true
+  hard:
+    requests.cpu: 600m
+    requests.memory: 1536Mi
+    limits.cpu: "3"
+    limits.memory: 2560Mi
+    pods: "8"
+    persistentvolumeclaims: "2"
+
+# Deny-by-default networking; see templates/networkpolicy.yaml for the five objects
+# this switch creates. Selector values are inherited from values.yaml.
+networkPolicy:
+  enabled: true
