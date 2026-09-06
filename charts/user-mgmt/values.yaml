@@ -153,9 +153,12 @@ ingress:
 resourceQuota:
   enabled: false
   # Anything valid in ResourceQuota.spec.hard. Sizing rule (see resourcequota.yaml):
-  #   limits.*   >= sum of all component limits   + one surge backend pod
-  #   requests.* >= sum of all component requests + one surge backend pod
-  # because a RollingUpdate starts the replacement pod before retiring the old one.
+  #   hard.*  >=  sum over all components  +  one extra copy of every component that rolls
+  # A RollingUpdate creates the replacement before retiring the old pod, and a chart change
+  # touching every component (a cpu limit, an image tag, a checksum annotation) rolls
+  # backend and frontend at the SAME time -- budgeting for a single surge pod is not enough.
+  # Postgres is `strategy: Recreate` and never surges. Too tight a quota does not slow the
+  # rollout down, it deadlocks it at "exceeded quota".
   # Headroom is deliberate on the limits side: Aufgabe 6 scales the backend to 4 replicas,
   # and 4 x 1 core of limit plus the other two components already needs 4.6 cores. A quota
   # that fits only today's three pods would make itself the thing that blocks the HPA.
@@ -178,14 +181,20 @@ networkPolicy:
     namespace: default
     podLabels:
       app: traefik
-  # Egress to the public internet, frontend only. Required: the Next.js route handlers
-  # in app/auth/ run server-side and call NEXT_PUBLIC_API_URL, which is the public
-  # https url baked into the image at build time -- so the pod leaves the cluster and
-  # re-enters through Traefik to reach the API.
-  # Can be tightened to the LoadBalancer address (129.212.193.64/32); left open because
-  # no in-cluster workload of ours listens on 443, so this opens no pod-to-pod path.
+  # Egress to the public internet for the frontend. OBSOLETE, and therefore off.
+  #
+  # It existed because the Next.js route handlers in app/auth/ called the PUBLIC api url
+  # that Next.js inlined into the image at build time: the pod had to leave the cluster
+  # and come back in through Traefik just to reach a backend two Services away. Now that
+  # the api address is resolved at runtime -- BACKEND_API_URL points at the in-cluster
+  # Service, and the browser calls a relative /api -- the frontend pod has no reason to
+  # talk to anything outside its own namespace.
+  #
+  # Fonts are self-hosted by next/font at build time, so nothing else needs it either.
+  # Flip back to true if a feature ever genuinely requires outbound calls; port and cidrs
+  # stay here so that remains a one-line change.
   frontendExternalEgress:
-    enabled: true
+    enabled: false
     port: 443
     cidrs:
       - 0.0.0.0/0
