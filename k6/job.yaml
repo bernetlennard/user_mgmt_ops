@@ -1,0 +1,49 @@
+# Aufgabe 2 Chaos Testing: k6 runs as a one-off Job in its own namespace, not as a standing
+# deployment -- a load test is something you run on demand, not something that should be
+# continuously reconciled by ArgoCD. The namespace has NO NetworkPolicy of its own (unlike
+# `staging`/`prod`, which default-deny both directions -- see charts/user-mgmt): k6 needs
+# egress to the public internet (DNS + the staging Ingress hostname), and putting it in a
+# NetworkPolicy-governed namespace would mean either punching a new hole in that policy for a
+# pod that only exists for a few minutes, or fighting the default-deny for no benefit -- k6
+# reaches the backend the same way a real client does, through Traefik on the public
+# hostname, never a Service directly.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k6
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: login-load-test
+  namespace: k6
+spec:
+  # A load test that failed to finish is not worth retrying automatically -- rerun by hand
+  # after checking why.
+  backoffLimit: 0
+  # Comfortably above the script's own 6-minute stage sum, so a hung run gets killed rather
+  # than occupying the node indefinitely.
+  activeDeadlineSeconds: 900
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:1.3.0
+          args:
+            - run
+            - /scripts/login-load-test.js
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: k6-login-load-test
