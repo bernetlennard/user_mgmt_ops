@@ -8,6 +8,29 @@
 #
 # Chart version this was written against: kube-prometheus-stack-91.2.3 (app v0.94.0).
 
+# DigitalOcean runs the control plane (etcd, scheduler, controller-manager) off-cluster, and
+# Cilium replaces kube-proxy entirely -- confirmed via `kubectl -n kube-system get endpoints`:
+# all four of the chart's own Services for these exist but have zero endpoints, permanently.
+# Disabling them removes their ServiceMonitor, alerting rules and dashboard together, instead
+# of leaving permanently-empty dashboards around.
+kubeControllerManager:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+# This cluster's nodes are all Linux -- the AIX/macOS variants of the Node Exporter dashboard
+# are chart-bundled alternates for those OSes and would stay empty forever here.
+nodeExporter:
+  operatingSystems:
+    aix:
+      enabled: false
+    darwin:
+      enabled: false
+
 # Every component below gets explicit requests/limits. Chart defaults leave several of them
 # unset, which makes those pods BestEffort QoS -- the first thing the kubelet kills under
 # memory pressure. That's exactly what happened to Grafana on this cluster's original 4GB
