@@ -105,10 +105,14 @@ grafana:
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 192Mi
+    # 256Mi OOMKilled the grafana container on every cold start (exit 137) -- Grafana 13's
+    # first boot (plugin bundle installs, the new apiserver, bleve index build) briefly needs
+    # more than its steady-state footprint. Observed ~285Mi shortly after a successful start
+    # under this 512Mi limit; re-check `kubectl top pod` if it ever gets OOMKilled again.
     limits:
       cpu: 200m
-      memory: 256Mi
+      memory: 512Mi
   # External access, same pattern as the other Ingresses on this cluster (vcs.linosteiner.ch,
   # argo.linosteiner.ch): Traefik + its Let's Encrypt certresolver, no cert-manager/Secret
   # needed. The DNS A record for grafana.linosteiner.ch -> the Traefik LoadBalancer IP
