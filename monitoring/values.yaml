@@ -158,6 +158,37 @@ grafana:
   # which are already scraped by this release's default ServiceMonitors.
   defaultDashboardsEnabled: true
 
+  # Required for dashboard #2 below to actually load: `grafana.dashboards.*` only mounts the
+  # JSON file onto disk at /var/lib/grafana/dashboards/<provider>/<name>.json -- it does NOT
+  # register a provider that reads that directory. Setting dashboardProviders REPLACES the
+  # chart's own auto-generated dashboardproviders.yaml wholesale (it's a raw file override,
+  # not a merge) -- so the "sidecarProvider" entry that dashboard #1 (the sidecar-fed default
+  # dashboards, watching /tmp/dashboards) depends on has to be repeated here verbatim,
+  # alongside the "default" provider for this dashboard. Dropping either one made that set of
+  # dashboards disappear from Grafana even though the files were still on disk. See
+  # charts/grafana/values.yaml's `sidecar.dashboards.provider` for where these values come
+  # from.
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: sidecarProvider
+          orgId: 1
+          folder: ""
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /tmp/dashboards
+        - name: default
+          orgId: 1
+          folder: ""
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
   # Dashboard #2: the user_mgmt_service application dashboard (request rate, response time,
   # error rate), provisioned as code so it survives a Grafana pod restart -- clicking a
   # dashboard together in the UI does not satisfy "befindet sich im Ops Repository" and does
