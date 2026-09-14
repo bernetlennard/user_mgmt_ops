@@ -109,6 +109,28 @@ grafana:
     limits:
       cpu: 200m
       memory: 256Mi
+  # External access, same pattern as the other Ingresses on this cluster (vcs.linosteiner.ch,
+  # argo.linosteiner.ch): Traefik + its Let's Encrypt certresolver, no cert-manager/Secret
+  # needed. The DNS A record for grafana.linosteiner.ch -> the Traefik LoadBalancer IP
+  # (129.212.193.64) is managed outside this repo (linosteiner.ch is not on DigitalOcean DNS)
+  # and has to be created by hand.
+  #
+  # Grafana's own login (admin / the auto-generated password in the prometheus-stack-grafana
+  # Secret) is what protects this -- there is no additional auth in front of it.
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+      traefik.ingress.kubernetes.io/router.tls: "true"
+      traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+    hosts:
+      - grafana.linosteiner.ch
+    path: /
+    pathType: Prefix
+    tls:
+      - hosts:
+          - grafana.linosteiner.ch
   sidecar:
     resources:
       requests:
