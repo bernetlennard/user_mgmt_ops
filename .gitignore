@@ -12,6 +12,14 @@ charts/*/Chart.lock
 values-local.yaml
 *.local.yaml
 
+# Terraform: provider cache, state, plan output, and the token-bearing tfvars file. The lock
+# file (.terraform.lock.hcl) IS committed on purpose -- it pins provider versions.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/*.auto.tfvars
+
 # Editors / OS
 .idea/
 .vscode/
