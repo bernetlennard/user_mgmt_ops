@@ -41,26 +41,36 @@ kubectl -n monitoring port-forward svc/prometheus-stack-kube-prom-prometheus 909
 # open http://localhost:9090/targets -- the user-mgmt backend ServiceMonitor target should be UP
 ```
 
-## Wiring a real Alertmanager notification channel
+## Alertmanager notification channel
 
-`values.yaml` ships a placeholder Alertmanager receiver on purpose (decided 2026-09-14). To
-point it at a real Slack webhook without ever putting the URL in git:
+Wired to [ntfy.sh](https://ntfy.sh) (decided 2026-09-14; no Slack workspace was available).
+Subscribe to the topic in the ntfy app or at
+`https://ntfy.sh/user-mgmt-backend-alerts-0810489237b6` to receive alerts.
+
+Verified end-to-end by posting a synthetic alert straight to Alertmanager's API (bypassing
+Prometheus, so it didn't need 5 real minutes of errors) and confirming it reached the topic:
 
 ```bash
-kubectl create secret generic alertmanager-user-mgmt-notifications \
-  --from-literal=url='https://hooks.slack.com/services/...' \
-  -n monitoring
+kubectl -n monitoring port-forward svc/prometheus-stack-kube-prom-alertmanager 9093:9093 &
+curl -X POST http://localhost:9093/api/v2/alerts -H "Content-Type: application/json" -d '[{
+  "labels": {"alertname": "UserMgmtBackendHighErrorRate", "service": "user-mgmt-backend", "severity": "warning"},
+  "annotations": {"summary": "test"},
+  "startsAt": "'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'"
+}]'
+# then: curl "https://ntfy.sh/<topic>/json?poll=1&since=10m" to confirm delivery
 ```
 
-Then in `values.yaml`:
+**Known limitation, accepted (2026-09-14):** ntfy.sh's free tier has no auth -- topics are
+public, and this one was found and spammed by strangers within minutes of creation (one
+message was offensive). Real alerts still get delivered correctly alongside the noise; a
+private channel (e.g. a Discord webhook, which is unguessable rather than merely unlisted)
+would avoid this if it becomes a problem. Rotating to a new random topic name only delays the
+same outcome.
 
-1. Add `alertmanager.alertmanagerSpec.secrets: [alertmanager-user-mgmt-notifications]` so the
-   Operator mounts it into the Alertmanager pod under
-   `/etc/alertmanager/secrets/alertmanager-user-mgmt-notifications/`.
-2. Change the `placeholder` receiver's `webhook_configs` entry to `slack_configs` with
-   `api_url_file: /etc/alertmanager/secrets/alertmanager-user-mgmt-notifications/url` instead
-   of an inline `url:`.
-3. `helm upgrade` again with the command above.
+The topic name isn't a credential the way a Slack webhook URL is -- worst case is spam, not a
+compromise -- so it's plain text in `values.yaml` here rather than a mounted Secret, same
+reasoning as the backend's JWT secret (see the app repo's README, "Secrets"). Rotate it any
+time by picking a new random name; nothing else depends on the old one.
 
 ## Why the ServiceMonitor/PrometheusRule in `charts/user-mgmt` carry `release: prometheus-stack`
 

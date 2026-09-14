@@ -66,23 +66,27 @@ alertmanager:
       limits:
         cpu: 100m
         memory: 128Mi
-  # PLACEHOLDER receiver -- deliberately not a real channel yet (decided 2026-09-14: wire a
-  # real one, e.g. a Slack incoming webhook, later). The webhook URL below is intentionally
-  # invalid so nothing here ever depends on a secret existing. When a real channel is ready:
-  #   1. Put its URL/credentials in a Kubernetes Secret in the `monitoring` namespace
-  #      (kubectl create secret generic alertmanager-user-mgmt-notifications
-  #        --from-literal=url='https://hooks.slack.com/services/...' -n monitoring)
-  #      -- NOT in this file, so the credential never lands in git.
-  #   2. Mount it via alertmanager.alertmanagerSpec.secrets: [alertmanager-user-mgmt-notifications]
-  #      (Prometheus Operator mounts every named secret under
-  #      /etc/alertmanager/secrets/<secret-name>/ inside the Alertmanager pod.)
-  #   3. Replace the `url:` below with `api_url_file: /etc/alertmanager/secrets/alertmanager-user-mgmt-notifications/url`
-  #      (Alertmanager's slack_configs/webhook_configs support reading the URL from a file, so
-  #      it never has to appear as plain text in this values.yaml either).
+  # Real notification channel (wired 2026-09-14): ntfy.sh, a free public push-notification
+  # service -- no account needed on either end, subscribe to the topic in the ntfy app or at
+  # https://ntfy.sh/<topic> to receive it. Chosen over Slack because no Slack workspace was
+  # available.
+  #
+  # The topic name is effectively the channel's address: anyone who knows it can publish to
+  # it or subscribe to read it (ntfy has no built-in auth for the free public instance). It's
+  # not a credential in the Slack-webhook sense -- worst case someone spams the topic with
+  # junk notifications, nothing is exposed or compromised -- so it's fine as plain text in a
+  # private repo, same reasoning as the backend's JWT secret (see README, "Secrets"). Rotate
+  # it any time by picking a new random topic name; nothing else depends on the old one.
+  #
+  # webhook_configs always POSTs Alertmanager's own fixed JSON payload -- there's no way to
+  # template a custom message body for it (unlike email/Slack receivers) -- so the push
+  # notification's body is that raw JSON, not nicely formatted prose. Readable (alertname,
+  # status, labels are all in there), just not pretty. A nicer notification would need a small
+  # transform proxy in front of ntfy, which is out of scope here.
   config:
     global: {}
     route:
-      receiver: placeholder
+      receiver: ntfy-user-mgmt-alerts
       group_by: [alertname, service]
       group_wait: 30s
       group_interval: 5m
@@ -90,11 +94,11 @@ alertmanager:
       routes:
         - matchers:
             - service = "user-mgmt-backend"
-          receiver: placeholder
+          receiver: ntfy-user-mgmt-alerts
     receivers:
-      - name: placeholder
+      - name: ntfy-user-mgmt-alerts
         webhook_configs:
-          - url: "https://alertmanager-placeholder.invalid/CHANGE_ME"
+          - url: "https://ntfy.sh/user-mgmt-backend-alerts-0810489237b6"
             send_resolved: true
 
 prometheusOperator:
