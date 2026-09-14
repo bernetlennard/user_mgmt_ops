@@ -102,6 +102,14 @@ prometheus-node-exporter:
       memory: 64Mi
 
 grafana:
+  # Without this, Grafana's SQLite DB lives in an emptyDir and resets to blank on every pod
+  # restart/recreation -- every manually created user (and the admin password) vanishes and
+  # gets reseeded from whatever the admin-password Secret currently holds. This is why the
+  # admin password kept changing across helm upgrades.
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClassName: do-block-storage
   resources:
     requests:
       cpu: 50m
