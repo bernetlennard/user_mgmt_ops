@@ -1,0 +1,25 @@
+{{- if .Values.monitoring.enabled }}
+# Tells the kube-prometheus-stack Prometheus (installed separately, in its own `monitoring`
+# namespace/release -- see monitoring/values.yaml at the repo root) to scrape this backend's
+# Actuator endpoint. The `release` label below, not the namespace, is what makes Prometheus
+# pick this object up: its Prometheus CR selects ServiceMonitors/PrometheusRules by that
+# label, cluster-wide, regardless of which namespace they live in.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "backend") | nindent 4 }}
+    release: {{ .Values.monitoring.prometheusReleaseLabel }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: management
+      path: {{ .Values.monitoring.serviceMonitor.path }}
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+{{- end }}

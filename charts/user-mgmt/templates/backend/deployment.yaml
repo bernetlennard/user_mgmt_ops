@@ -32,8 +32,9 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.backend.service.port }}
-            # Actuator, declared for documentation only: no Service or Ingress references it,
-            # and the kubelet reaches it on the pod IP to run the probes below.
+            # Actuator: the kubelet reaches it on the pod IP for the probes below, and,
+            # when monitoring.enabled, the Service above and the ServiceMonitor next to it
+            # publish it for Prometheus too. No Ingress ever references it.
             - name: management
               containerPort: {{ .Values.backend.management.port }}
           env:

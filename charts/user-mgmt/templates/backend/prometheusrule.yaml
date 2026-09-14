@@ -1,0 +1,33 @@
+{{- if .Values.monitoring.enabled }}
+# A fachlich sinnvoller Fehlerzustand for the backend: a sustained high share of 5xx
+# responses. Filters on the `application` tag set via management.metrics.tags.application in
+# the Spring Boot app rather than on the Kubernetes Service name, so the same rule works
+# unchanged in every environment/release. Same `release` label rule as the ServiceMonitor:
+# required for kube-prometheus-stack's Prometheus CR to load this object at all.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}-alerts
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "backend") | nindent 4 }}
+    release: {{ .Values.monitoring.prometheusReleaseLabel }}
+spec:
+  groups:
+    - name: user-mgmt-backend.rules
+      rules:
+        - alert: UserMgmtBackendHighErrorRate
+          expr: >-
+            (
+              sum(rate(http_server_requests_seconds_count{application="{{ .Values.monitoring.prometheusRule.applicationTag }}", outcome="SERVER_ERROR"}[5m]))
+              /
+              sum(rate(http_server_requests_seconds_count{application="{{ .Values.monitoring.prometheusRule.applicationTag }}"}[5m]))
+            ) > {{ .Values.monitoring.prometheusRule.errorRateThreshold }}
+          for: {{ .Values.monitoring.prometheusRule.for }}
+          labels:
+            severity: {{ .Values.monitoring.prometheusRule.severity }}
+            service: user-mgmt-backend
+          annotations:
+            summary: "user_mgmt_service: high 5xx error rate"
+            description: >-
+              {{ printf "More than %v%% of requests to user_mgmt_service have returned a 5xx response for at least %s." (mulf .Values.monitoring.prometheusRule.errorRateThreshold 100.0) .Values.monitoring.prometheusRule.for }}
+{{- end }}

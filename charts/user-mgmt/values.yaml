@@ -206,6 +206,30 @@ resourceQuota:
     pods: "12"
     persistentvolumeclaims: "2"
 
+# Wiring for the kube-prometheus-stack Helm release (a separate install, in its own
+# `monitoring` namespace -- see monitoring/values.yaml at the repo root for that stack's own
+# configuration). On by default in every environment; there is no per-environment reason to
+# turn it off, unlike resourceQuota/networkPolicy above.
+monitoring:
+  enabled: true
+  # Namespace the kube-prometheus-stack release lives in. Both the ServiceMonitor's
+  # namespaceSelector context and the allow-monitoring NetworkPolicy rule key off this.
+  namespace: monitoring
+  # kube-prometheus-stack's Prometheus CR only loads ServiceMonitors/PrometheusRules that
+  # carry this label -- it is the name of THAT Helm release, not of this one, and has nothing
+  # to do with which namespace the object lives in.
+  prometheusReleaseLabel: prometheus-stack
+  serviceMonitor:
+    path: /actuator/prometheus
+    interval: 15s
+  prometheusRule:
+    # Must match management.metrics.tags.application in
+    # user_mgmt_service/src/main/resources/application.properties.
+    applicationTag: user-mgmt-service
+    errorRateThreshold: 0.05
+    for: 5m
+    severity: warning
+
 networkPolicy:
   enabled: false
   # Namespace running CoreDNS, selected by the kubernetes.io/metadata.name label that

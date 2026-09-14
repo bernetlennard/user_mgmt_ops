@@ -10,11 +10,17 @@ spec:
   # endpoints, while ClientIP would pin each client to one replica. Safe because the API is
   # stateless -- authentication is a JWT in the request, not a server-side session.
   sessionAffinity: None
-  # The Actuator port (backend.management.port) is deliberately not published here; only the
-  # kubelet talks to it, on the pod IP.
   selector:
     {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 4 }}
   ports:
     - name: backend
       port: {{ .Values.backend.service.port }}
       targetPort: {{ .Values.backend.service.port }}
+    {{- if .Values.monitoring.enabled }}
+    # The Actuator/metrics port. Named so the ServiceMonitor below can target it by name
+    # instead of a hardcoded number, and published only for Prometheus -- the NetworkPolicy
+    # still restricts who may actually reach it.
+    - name: management
+      port: {{ .Values.backend.management.port }}
+      targetPort: {{ .Values.backend.management.port }}
+    {{- end }}

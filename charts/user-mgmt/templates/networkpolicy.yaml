@@ -149,4 +149,31 @@ spec:
       ports:
         - port: {{ .Values.postgres.service.port }}
           protocol: TCP
+{{- if $.Values.monitoring.enabled }}
+---
+# 6. Monitoring: Prometheus (running in the `monitoring` namespace) may reach the backend's
+#    Actuator/metrics port. This is additive to policy 4 above -- policy 4 still governs the
+#    backend's egress and its ingress from the ingress controller/frontend on the app port;
+#    this one only adds an ingress rule for the metrics port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "user-mgmt.fullname" . }}-allow-monitoring
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "netpol") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.monitoring.namespace }}
+      ports:
+        - port: {{ .Values.backend.management.port }}
+          protocol: TCP
+{{- end }}
 {{- end }}

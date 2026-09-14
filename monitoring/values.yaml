@@ -1,0 +1,201 @@
+# Declarative configuration for the kube-prometheus-stack Helm release ("prometheus-stack" in
+# the `monitoring` namespace). This is a separate Helm release from charts/user-mgmt -- it is
+# NOT deployed through ArgoCD (both Application objects in argocd/ only track charts/user-mgmt)
+# -- so applying changes here means re-running the helm upgrade command in monitoring/README.md
+# by hand. See that file for the full install/upgrade procedure, including the CRD-install
+# step a completely fresh cluster needs before this chart's ServiceMonitor/PrometheusRule
+# objects (from charts/user-mgmt) can exist at all.
+#
+# Chart version this was written against: kube-prometheus-stack-91.2.3 (app v0.94.0).
+
+# Every component below gets explicit requests/limits. Chart defaults leave several of them
+# unset, which makes those pods BestEffort QoS -- the first thing the kubelet kills under
+# memory pressure. That's exactly what happened to Grafana on this cluster's original 4GB
+# node before it was resized to 8GB: see the eviction event in `kubectl describe pod` history
+# ("The node was low on resource: memory ... request is 0").
+
+prometheus:
+  prometheusSpec:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    # 7 days is plenty for a course project and keeps disk/memory bounded; the default is 10d.
+    retention: 7d
+    # Belt-and-braces: kube-prometheus-stack already sets these selectors to match the
+    # `release: prometheus-stack` label when left nil (serviceMonitorSelectorNilUsesHelmValues
+    # etc. default to true), which is exactly the label charts/user-mgmt's ServiceMonitor and
+    # PrometheusRule carry. Spelled out explicitly here so the coupling isn't hidden in a
+    # chart default someone has to go look up.
+    serviceMonitorSelectorNilUsesHelmValues: true
+    podMonitorSelectorNilUsesHelmValues: true
+    ruleSelectorNilUsesHelmValues: true
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+  # PLACEHOLDER receiver -- deliberately not a real channel yet (decided 2026-09-14: wire a
+  # real one, e.g. a Slack incoming webhook, later). The webhook URL below is intentionally
+  # invalid so nothing here ever depends on a secret existing. When a real channel is ready:
+  #   1. Put its URL/credentials in a Kubernetes Secret in the `monitoring` namespace
+  #      (kubectl create secret generic alertmanager-user-mgmt-notifications
+  #        --from-literal=url='https://hooks.slack.com/services/...' -n monitoring)
+  #      -- NOT in this file, so the credential never lands in git.
+  #   2. Mount it via alertmanager.alertmanagerSpec.secrets: [alertmanager-user-mgmt-notifications]
+  #      (Prometheus Operator mounts every named secret under
+  #      /etc/alertmanager/secrets/<secret-name>/ inside the Alertmanager pod.)
+  #   3. Replace the `url:` below with `api_url_file: /etc/alertmanager/secrets/alertmanager-user-mgmt-notifications/url`
+  #      (Alertmanager's slack_configs/webhook_configs support reading the URL from a file, so
+  #      it never has to appear as plain text in this values.yaml either).
+  config:
+    global: {}
+    route:
+      receiver: placeholder
+      group_by: [alertname, service]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 3h
+      routes:
+        - matchers:
+            - service = "user-mgmt-backend"
+          receiver: placeholder
+    receivers:
+      - name: placeholder
+        webhook_configs:
+          - url: "https://alertmanager-placeholder.invalid/CHANGE_ME"
+            send_resolved: true
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+
+grafana:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  sidecar:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+  # Chart default; spelled out because dashboard #1 below (per-pod CPU/memory) relies on it.
+  # This ships the chart's bundled "Kubernetes / Compute Resources / Pod", "... / Namespace
+  # (Pods)", "... / Node" etc. dashboards, all backed by kube-state-metrics + node-exporter,
+  # which are already scraped by this release's default ServiceMonitors.
+  defaultDashboardsEnabled: true
+
+  # Dashboard #2: the user_mgmt_service application dashboard (request rate, response time,
+  # error rate), provisioned as code so it survives a Grafana pod restart -- clicking a
+  # dashboard together in the UI does not satisfy "befindet sich im Ops Repository" and does
+  # not survive an eviction like the one this Grafana pod already had once.
+  #
+  # Metric names are Micrometer's default Spring Boot HTTP server timer
+  # (http.server.requests -> http_server_requests_seconds_{count,sum,bucket} once exported via
+  # micrometer-registry-prometheus). The `application` label matches
+  # management.metrics.tags.application in user_mgmt_service's application.properties and
+  # monitoring.prometheusRule.applicationTag in charts/user-mgmt/values.yaml -- keep all three
+  # in sync if either changes. Verify the metric names against the live endpoint before
+  # trusting this blindly:
+  #   kubectl -n staging exec deploy/<release>-user-mgmt-backend -- \
+  #     curl -s localhost:8081/actuator/prometheus | grep http_server_requests
+  dashboards:
+    default:
+      user-mgmt-backend:
+        json: |
+          {
+            "id": null,
+            "uid": "user-mgmt-backend",
+            "title": "user_mgmt_service - Application Metrics",
+            "tags": ["user-mgmt", "spring-boot"],
+            "timezone": "browser",
+            "schemaVersion": 39,
+            "version": 1,
+            "refresh": "30s",
+            "time": { "from": "now-1h", "to": "now" },
+            "panels": [
+              {
+                "id": 1,
+                "type": "timeseries",
+                "title": "Request Rate",
+                "datasource": null,
+                "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+                "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+                "targets": [
+                  {
+                    "expr": "sum(rate(http_server_requests_seconds_count{application=\"user-mgmt-service\"}[$__rate_interval])) by (uri, method)",
+                    "legendFormat": "{{method}} {{uri}}",
+                    "refId": "A"
+                  }
+                ]
+              },
+              {
+                "id": 2,
+                "type": "timeseries",
+                "title": "Average Response Time",
+                "datasource": null,
+                "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+                "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+                "targets": [
+                  {
+                    "expr": "sum(rate(http_server_requests_seconds_sum{application=\"user-mgmt-service\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{application=\"user-mgmt-service\"}[$__rate_interval]))",
+                    "legendFormat": "avg response time",
+                    "refId": "A"
+                  }
+                ]
+              },
+              {
+                "id": 3,
+                "type": "timeseries",
+                "title": "Error Rate",
+                "datasource": null,
+                "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+                "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] },
+                "targets": [
+                  {
+                    "expr": "100 * sum(rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", outcome=\"SERVER_ERROR\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{application=\"user-mgmt-service\"}[$__rate_interval]))",
+                    "legendFormat": "error %",
+                    "refId": "A"
+                  }
+                ]
+              }
+            ]
+          }
