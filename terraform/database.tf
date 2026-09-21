@@ -28,14 +28,31 @@ resource "digitalocean_database_db" "prod" {
   name       = var.database_name_prod
 }
 
+# The lifecycle block works around a provider bug, not a real setting. After creation the
+# provider reads back an empty `settings {}` block that was never configured, then tries to
+# PUT it on the next apply -- which the API rejects outright:
+#
+#   400 request is missing the following required fields: user_settings
+#
+# That turns every subsequent `terraform apply` into a hard failure, including applies that
+# have nothing to do with these users. Ignoring the phantom block is the fix; there are no
+# real per-user settings to manage here.
 resource "digitalocean_database_user" "staging" {
   cluster_id = digitalocean_database_cluster.postgres.id
   name       = var.database_user_staging
+
+  lifecycle {
+    ignore_changes = [settings]
+  }
 }
 
 resource "digitalocean_database_user" "prod" {
   cluster_id = digitalocean_database_cluster.postgres.id
   name       = var.database_user_prod
+
+  lifecycle {
+    ignore_changes = [settings]
+  }
 }
 
 # Trusted Sources: the managed database rejects everything that isn't listed here, regardless

@@ -70,6 +70,36 @@ without the postgres templates reaches `HEAD`, ArgoCD deletes the old in-cluster
 Deployment *and its PVC* in both namespaces. Create these Secrets first: a backend pod whose
 `secretKeyRef` target is missing sits in `CreateContainerConfigError` with no logs to read.
 
+## Grant the app users schema rights (one-time, required)
+
+**Without this the application silently has no database schema.** PostgreSQL 15+ revoked the
+default `CREATE` privilege on the `public` schema for everyone except the schema owner. The
+databases are owned by DigitalOcean's built-in `doadmin`, so the per-environment users this
+Terraform creates can connect but cannot create tables -- Hibernate's `ddl-auto: update` logs
+`ERROR: permission denied for schema public` at DEBUG level and carries on with no tables.
+
+The failure is nastier than it sounds: the pods stay `Ready` (the health check only opens a
+connection, it does not touch a table) while every request returns **403/401**, because the
+security filter chain's user lookup hits a missing relation. Nothing points at the database.
+
+Run once per database, as `doadmin`:
+
+```sql
+GRANT ALL ON SCHEMA public TO "user_mgmt_staging";
+ALTER SCHEMA public OWNER TO "user_mgmt_staging";
+-- and the same for user_mgmt_prod in the user_mgmt_prod database
+```
+
+The admin credentials are `terraform output -raw database_admin_user` /
+`database_admin_password`. They exist for exactly this bootstrap -- the application never uses
+them and they are deliberately not put into any Kubernetes Secret. Restart the backends
+afterwards so Hibernate retries the DDL:
+
+```bash
+kubectl -n staging rollout restart deploy user-mgmt-staging-user-mgmt-backend
+kubectl -n prod rollout restart deploy user-mgmt-prod-user-mgmt-backend
+```
+
 ## Verify
 
 ```bash

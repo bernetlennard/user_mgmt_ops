@@ -46,3 +46,18 @@ output "database_password_prod" {
   value       = digitalocean_database_user.prod.password
   sensitive   = true
 }
+
+# DigitalOcean's built-in admin user. Needed only for the one-time schema GRANT documented in
+# README.md -- the application never uses these credentials, and they are deliberately NOT
+# put into any Kubernetes Secret.
+output "database_admin_user" {
+  description = "Built-in admin user (doadmin). For one-time bootstrap only."
+  value       = digitalocean_database_cluster.postgres.user
+  sensitive   = true
+}
+
+output "database_admin_password" {
+  description = "Password of the built-in admin user. For one-time bootstrap only."
+  value       = digitalocean_database_cluster.postgres.password
+  sensitive   = true
+}
