@@ -17,10 +17,14 @@
 # holds that Secret's name and key names, so no database password ever lands in git -- a
 # stricter rule than the JWT secret below, because this one guards data outside the cluster.
 externalDatabase:
-  # Overridden per environment -- each release gets its own logical database and user on the
-  # shared managed cluster.
-  host: ""
+  # Shared by both environments -- one managed cluster, one logical database per release.
+  # The `private-` prefix is what keeps this on the VPC; the public hostname (same name
+  # without the prefix) would route over the internet and is not allowed by the Trusted
+  # Sources firewall in terraform/database.tf.
+  host: private-user-mgmt-postgres-do-user-39792807-0.m.db.ondigitalocean.com
   port: 25060
+  # No default on purpose -- set per environment, and `required` in the jdbcUrl helper so a
+  # missing value fails the render instead of producing a wrong URL.
   database: ""
   sslMode: require
   # Secret holding the credentials. Created out of band; the chart never renders it, so
