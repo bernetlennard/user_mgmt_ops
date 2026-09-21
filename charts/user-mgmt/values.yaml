@@ -61,6 +61,11 @@ backend:
     ddlAuto: update
     contextPath: /api
     javaToolOptions: "-XX:MaxRAMPercentage=60"
+    # See the arithmetic in templates/backend/configmap.yaml: the managed database's
+    # connection budget is shared by every backend pod in both environments, so this is a
+    # cluster-wide constraint, not a per-pod tuning knob. 3 x 5 pods = 15 of ~22 available.
+    hikariMaxPoolSize: 3
+    hikariMinIdle: 1
   # HS256 signing key, 512 bit. Plain text because this repo is private -- see README, "Secrets".
   jwtSecret: "VIJQAsGSlarKapEGDwf1MgTiTIzvQJPEktgdisQeuRzjeUu1srpGNpbfhdnUPSZXYduiUAkNbMnKdQShQ7mFXw=="
   # The cpu limit is generous on purpose: a throttled JVM starts slowly, and a limit costs

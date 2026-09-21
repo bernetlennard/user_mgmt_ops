@@ -14,3 +14,18 @@ data:
   # backend.management.port. The management context does not inherit
   # SERVER_SERVLET_CONTEXT_PATH, so the probe paths carry no /api prefix.
   MANAGEMENT_SERVER_PORT: {{ .Values.backend.management.port | quote }}
+  # HikariCP pool size, capped because the connection budget is now a shared, finite resource
+  # rather than a private sidecar database. The db-s-1vcpu-1gb managed tier allows ~22 client
+  # connections in total, while Hikari defaults to 10 PER POD -- and the HPAs can put 2
+  # staging + 3 prod backends on that one database, i.e. up to 50 requested connections.
+  # Exceeding it does NOT fail cleanly: the pods stay Ready (the health check only needs one
+  # connection) while real requests fail with 403/401, because the security filter chain
+  # cannot look the user up.
+  #
+  #   worst case = (staging maxReplicas + prod maxReplicas) x maximumPoolSize
+  #              = (2 + 3) x {{ .Values.backend.config.hikariMaxPoolSize }} = {{ mul 5 (.Values.backend.config.hikariMaxPoolSize | int) }} connections
+  #
+  # Raise the database tier (or put DigitalOcean's connection pooler in front) before raising
+  # this.
+  SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: {{ .Values.backend.config.hikariMaxPoolSize | quote }}
+  SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: {{ .Values.backend.config.hikariMinIdle | quote }}
