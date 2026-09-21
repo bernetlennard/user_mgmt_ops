@@ -38,28 +38,28 @@ spec:
             - name: management
               containerPort: {{ .Values.backend.management.port }}
           env:
-            - name: POSTGRES_DB
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
-                  key: POSTGRES_DB
-            # Built from the release-prefixed Service name, so each release reaches its own
-            # database.
+            # Fully resolved by Helm from externalDatabase.* -- host, port, database name and
+            # sslmode all come from values, no $(VAR) indirection. See the jdbcUrl helper for
+            # why that indirection was removed along with the in-cluster database.
             - name: SPRING_DATASOURCE_URL
-              value: {{ include "user-mgmt.postgres.jdbcUrl" $ | quote }}
-            # Wired key by key rather than with envFrom: the credentials live in the Postgres
-            # Secret as POSTGRES_* but Spring reads them as SPRING_DATASOURCE_*, and envFrom
+              value: {{ include "user-mgmt.database.jdbcUrl" $ | quote }}
+            # Wired key by key rather than with envFrom: Spring reads SPRING_DATASOURCE_*, the
+            # Secret stores the generic username/password keys Terraform emits, and envFrom
             # cannot rename keys.
+            #
+            # This Secret is NOT rendered by the chart -- it is created out of band from the
+            # Terraform outputs (terraform/README.md), so the managed database's password never
+            # enters git. That also means ArgoCD does not manage it and will not prune it.
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
-                  key: POSTGRES_USER
+                  name: {{ .Values.externalDatabase.existingSecret }}
+                  key: {{ .Values.externalDatabase.usernameKey }}
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "postgres") }}
-                  key: POSTGRES_PASSWORD
+                  name: {{ .Values.externalDatabase.existingSecret }}
+                  key: {{ .Values.externalDatabase.passwordKey }}
           envFrom:
             - secretRef:
                 name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "backend") }}

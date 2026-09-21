@@ -9,14 +9,11 @@
 # node with 1263m / 2156Mi available to them together, and memory runs out long before cpu
 # does. See docs/scaling.md.
 
-postgres:
-  resources:
-    requests:
-      cpu: 50m
-      memory: 96Mi
-    limits:
-      cpu: 300m
-      memory: 256Mi
+# Prod's own logical database and user on the shared managed Postgres cluster. host/port come
+# from `terraform output database_private_host` / `database_port`; the credentials live in the
+# `user-mgmt-db` Secret in this namespace, created out of band (terraform/README.md).
+externalDatabase:
+  database: user_mgmt_prod
 
 backend:
   resources:
@@ -60,16 +57,19 @@ frontend:
     minAvailable: 1
 
 # Namespace ceiling for `prod`. Worst case is the autoscaler at maxReplicas during a rollout:
-# backend 3 + 1 surge = 4 pods, frontend 2 + 1 = 3, postgres 1 (Recreate, never surges).
+# backend 3 + 1 surge = 4 pods, frontend 2 + 1 = 3. The postgres term is gone since Aufgabe 4
+# -- the database is a managed service outside the cluster and consumes no namespace quota.
 #
-#   pods            = 4 backend + 3 frontend + 1 postgres          =    8
-#   requests.cpu    =  50m + 4x100m + 3x50m                        =  600m
-#   requests.memory =  96Mi + 4x320Mi + 3x96Mi                     = 1664Mi
-#   limits.cpu      = 300m + 4x1000m + 3x300m                      = 5200m
-#   limits.memory   = 256Mi + 4x700Mi + 3x256Mi                    = 3824Mi
+#   pods            = 4 backend + 3 frontend          =    7
+#   requests.cpu    = 4x100m + 3x50m                  =  550m
+#   requests.memory = 4x320Mi + 3x96Mi                = 1568Mi
+#   limits.cpu      = 4x1000m + 3x300m                = 4900m
+#   limits.memory   = 4x700Mi + 3x256Mi               = 3568Mi
 #
 # The numbers below clear that with room to spare: the node should be what runs out first, so
-# the quota stays a guard rail rather than becoming the scaling limit itself.
+# the quota stays a guard rail rather than becoming the scaling limit itself. Left unchanged
+# rather than tightened to the new sums -- re-tuning them is a separate decision from removing
+# the database.
 resourceQuota:
   enabled: true
   hard:
@@ -78,6 +78,8 @@ resourceQuota:
     limits.cpu: "6"
     limits.memory: 4Gi
     pods: "12"
+    # The postgres PVC was the chart's only one, so real usage is now 0. Kept as a guard rail
+    # against a stray PVC appearing, not because anything claims one.
     persistentvolumeclaims: "2"
 
 # Deny-by-default networking; see templates/networkpolicy.yaml. Selector values are inherited

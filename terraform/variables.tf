@@ -46,3 +46,55 @@ variable "node_pool_count" {
   type        = number
   default     = 1
 }
+
+# The DOKS cluster's VPC. Shared by the managed database so the two talk over DigitalOcean's
+# private network rather than the public internet.
+variable "vpc_uuid" {
+  description = "UUID of the VPC the cluster and the managed database both live in."
+  type        = string
+  default     = "9c49662a-56ec-4b69-9c4a-9178ef9c1cee"
+}
+
+# --- Managed PostgreSQL (Aufgabe 4) ---
+
+variable "database_cluster_name" {
+  description = "Name of the managed PostgreSQL cluster."
+  type        = string
+  default     = "user-mgmt-postgres"
+}
+
+variable "database_version" {
+  description = "Managed PostgreSQL major version. Check `doctl databases options versions --engine pg` for what DigitalOcean currently offers before bumping."
+  type        = string
+  default     = "17"
+}
+
+variable "database_size" {
+  description = "Managed database node size slug. db-s-1vcpu-1gb is the smallest (and cheapest) tier."
+  type        = string
+  default     = "db-s-1vcpu-1gb"
+}
+
+variable "database_name_staging" {
+  description = "Logical database used by the staging release."
+  type        = string
+  default     = "user_mgmt_staging"
+}
+
+variable "database_name_prod" {
+  description = "Logical database used by the prod release."
+  type        = string
+  default     = "user_mgmt_prod"
+}
+
+variable "database_user_staging" {
+  description = "Database user for the staging release."
+  type        = string
+  default     = "user_mgmt_staging"
+}
+
+variable "database_user_prod" {
+  description = "Database user for the prod release."
+  type        = string
+  default     = "user_mgmt_prod"
+}

@@ -19,7 +19,7 @@ resource "digitalocean_kubernetes_cluster" "this" {
   name     = var.cluster_name
   region   = var.region
   version  = var.kubernetes_version
-  vpc_uuid = "9c49662a-56ec-4b69-9c4a-9178ef9c1cee"
+  vpc_uuid = var.vpc_uuid
 
   ha            = false
   auto_upgrade  = false

@@ -16,14 +16,11 @@ ingress:
     - vcs-staging.lennardbernet.ch
     - vcs-staging.linosteiner.ch
 
-postgres:
-  resources:
-    requests:
-      cpu: 50m
-      memory: 96Mi
-    limits:
-      cpu: 200m
-      memory: 256Mi
+# Staging's own logical database and user on the shared managed Postgres cluster. host/port
+# come from `terraform output database_private_host` / `database_port`; the credentials live
+# in the `user-mgmt-db` Secret in this namespace, created out of band (terraform/README.md).
+externalDatabase:
+  database: user_mgmt_staging
 
 backend:
   # 750m cpu instead of prod's full core, still above what JVM startup needs inside the
@@ -72,18 +69,23 @@ frontend:
     maxUnavailable: 1
 
 # Namespace ceiling for `staging`. Worst case is the autoscaler at maxReplicas during a
-# rollout: backend 2 + 1 surge = 3 pods, frontend 1 + 1 = 2, postgres 1 (Recreate, never
-# surges).
+# rollout: backend 2 + 1 surge = 3 pods, frontend 1 + 1 = 2. The postgres term is gone since
+# Aufgabe 4 -- the database is a managed service outside the cluster and consumes no
+# namespace quota at all.
 #
-#   pods            = 3 backend + 2 frontend + 1 postgres      =    6
-#   requests.cpu    =  50m + 3x100m + 2x50m                    =  450m
-#   requests.memory =  96Mi + 3x320Mi + 2x96Mi                 = 1248Mi
-#   limits.cpu      = 200m + 3x750m + 2x200m                   = 2850m
-#   limits.memory   = 256Mi + 3x700Mi + 2x256Mi                = 2868Mi
+#   pods            = 3 backend + 2 frontend      =    5
+#   requests.cpu    = 3x100m + 2x50m              =  400m
+#   requests.memory = 3x320Mi + 2x96Mi            = 1152Mi
+#   limits.cpu      = 3x750m + 2x200m             = 2650m
+#   limits.memory   = 3x700Mi + 2x256Mi           = 2612Mi
 #
-# limits.memory at 3Gi is the tightest of the ceilings: below the 2868Mi worst case the quota,
+# limits.memory at 3Gi is the tightest of the ceilings: below the 2612Mi worst case the quota,
 # not the node, would stop the autoscaler -- and that fails silently, as "exceeded quota" on
 # the ReplicaSet rather than as anything visible on the HPA.
+#
+# The ceilings are deliberately left where they were rather than tightened to the new sums:
+# they still clear the worst case with the same headroom, and re-tuning them is a separate
+# decision from removing the database.
 resourceQuota:
   enabled: true
   hard:
@@ -92,6 +94,8 @@ resourceQuota:
     limits.cpu: "3"
     limits.memory: 3Gi
     pods: "8"
+    # The postgres PVC was the chart's only one, so real usage is now 0. Kept as a guard rail
+    # against a stray PVC appearing, not because anything claims one.
     persistentvolumeclaims: "2"
 
 # Deny-by-default networking; see templates/networkpolicy.yaml. Selector values are inherited

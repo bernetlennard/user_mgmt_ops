@@ -90,7 +90,10 @@ spec:
     {{- end }}
 ---
 # 4. Backend: reachable from the ingress controller (the /api path) and from the
-#    frontend; may talk to Postgres. No internet egress -- it needs none.
+#    frontend; may reach the managed database over the VPC. That database egress is the only
+#    reason it leaves the namespace -- and because the endpoint is outside the cluster it has
+#    to be expressed as an ipBlock: a podSelector can only ever match pod IPs, so the old
+#    in-cluster rule would silently drop every connection to the managed endpoint.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -120,38 +123,16 @@ spec:
           protocol: TCP
   egress:
     - to:
-        - podSelector:
-            matchLabels:
-              {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 14 }}
+        {{- range .Values.networkPolicy.databaseEgress.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
       ports:
-        - port: {{ .Values.postgres.service.port }}
-          protocol: TCP
----
-# 5. Postgres: reachable from the backend in this namespace and from nowhere else. No egress
-#    beyond the shared DNS policy -- the database initiates nothing.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: {{ include "user-mgmt.fullname" . }}-allow-postgres
-  labels:
-    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "netpol") | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 6 }}
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 14 }}
-      ports:
-        - port: {{ .Values.postgres.service.port }}
+        - port: {{ .Values.externalDatabase.port }}
           protocol: TCP
 {{- if $.Values.monitoring.enabled }}
 ---
-# 6. Monitoring: Prometheus (running in the `monitoring` namespace) may reach the backend's
+# 5. Monitoring: Prometheus (running in the `monitoring` namespace) may reach the backend's
 #    Actuator/metrics port. This is additive to policy 4 above -- policy 4 still governs the
 #    backend's egress and its ingress from the ingress controller/frontend on the app port;
 #    this one only adds an ingress rule for the metrics port.

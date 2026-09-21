@@ -109,9 +109,25 @@ spec:
 {{- end }}
 
 {{/*
-JDBC url built from the release-prefixed Postgres Service name.
-$(POSTGRES_DB) stays literal on purpose -- Kubernetes expands it, not Helm.
+JDBC url for the external (DigitalOcean Managed) Postgres.
+
+Fully resolved by Helm -- no $(VAR) indirection. The previous in-cluster version deliberately
+emitted a literal $(POSTGRES_DB) for the kubelet to expand, which only worked because
+POSTGRES_DB was declared earlier in the same env list; values injected via envFrom are NOT
+available for that expansion. Since the database name is now a plain chart value there is no
+reason to route it through the environment at all, and doing it here removes that footgun.
+
+sslMode is not optional in practice: DigitalOcean's managed databases reject unencrypted
+connections, and the JDBC driver defaults to not requiring TLS.
+
+host and database are `required` on purpose. They have no sensible default -- they come from
+`terraform output` after the managed database exists -- and an empty value would otherwise
+render a syntactically valid but wrong URL, producing a backend that starts and then fails
+its readiness probe with a connection error. Failing at template time turns that into an
+obvious ArgoCD sync error instead.
 */}}
-{{- define "user-mgmt.postgres.jdbcUrl" -}}
-{{- printf "jdbc:postgresql://%s:%v/$(POSTGRES_DB)" (include "user-mgmt.componentName" (dict "ctx" . "component" "postgres")) .Values.postgres.service.port }}
+{{- define "user-mgmt.database.jdbcUrl" -}}
+{{- $host := required "externalDatabase.host is required -- get it from `terraform output -raw database_private_host`" .Values.externalDatabase.host }}
+{{- $database := required "externalDatabase.database is required -- set it per environment in values-staging.yaml / values-prod.yaml" .Values.externalDatabase.database }}
+{{- printf "jdbc:postgresql://%s:%v/%s?sslmode=%s" $host (.Values.externalDatabase.port | int) $database .Values.externalDatabase.sslMode }}
 {{- end }}

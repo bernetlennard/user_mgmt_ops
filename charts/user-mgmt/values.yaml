@@ -4,44 +4,30 @@
 # and Kubernetes rejects containers without them. Requests sit close to measured usage
 # because the cluster is a single small node -- the arithmetic is in docs/scaling.md.
 
-postgres:
-  database: user_mgmt_db
-  auth:
-    username: admin
-    password: admin
-  image:
-    name: postgres
-    repository: postgres
-    tag: "16-alpine"
-    pullPolicy: IfNotPresent
-  replicaCount: 1
-  service:
-    port: 5432
-  # Recreate: the PVC is ReadWriteOnce, so two Postgres pods can never hold the volume at once.
-  strategy:
-    type: Recreate
-  persistence:
-    enabled: true
-    size: 1Gi
-    accessMode: ReadWriteOnce
-  resources:
-    requests:
-      cpu: 50m
-      memory: 96Mi
-    limits:
-      cpu: 300m
-      memory: 256Mi
-  probes:
-    readiness:
-      exec:
-        command: [ "sh", "-c", 'exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' ]
-      initialDelaySeconds: 5
-      periodSeconds: 10
-    liveness:
-      exec:
-        command: [ "sh", "-c", 'exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' ]
-      initialDelaySeconds: 15
-      periodSeconds: 20
+# DigitalOcean Managed PostgreSQL (Aufgabe 4). The chart no longer runs a database of its
+# own -- no Deployment, no Service, no PVC -- it only points the backend at an external
+# endpoint provisioned by terraform/ (see terraform/database.tf).
+#
+# host/port come from `terraform output database_private_host` / `database_port`. The private
+# host keeps traffic on DigitalOcean's VPC instead of the public internet; the port is
+# assigned per cluster and is deliberately NOT 5432, so nothing here may assume that.
+#
+# The credentials are NOT in this file: the username and password live in a Kubernetes Secret
+# created out of band from the Terraform outputs (see terraform/README.md). The chart only
+# holds that Secret's name and key names, so no database password ever lands in git -- a
+# stricter rule than the JWT secret below, because this one guards data outside the cluster.
+externalDatabase:
+  # Overridden per environment -- each release gets its own logical database and user on the
+  # shared managed cluster.
+  host: ""
+  port: 25060
+  database: ""
+  sslMode: require
+  # Secret holding the credentials. Created out of band; the chart never renders it, so
+  # ArgoCD neither manages nor prunes it.
+  existingSecret: user-mgmt-db
+  usernameKey: username
+  passwordKey: password
 backend:
   image:
     name: backend
@@ -247,3 +233,14 @@ networkPolicy:
     port: 443
     cidrs:
       - 0.0.0.0/0
+  # The backend's database now lives OUTSIDE the cluster (DigitalOcean Managed Postgres), so
+  # its egress rule can no longer be a podSelector -- those only ever match pod IPs. This has
+  # to be an ipBlock, and it is the single reason the backend is allowed to leave the
+  # namespace at all.
+  #
+  # The CIDR is the VPC the cluster and the database share, from
+  # `terraform output vpc_ip_range`. Scoped to the VPC rather than 0.0.0.0/0 so a compromised
+  # backend still cannot reach the public internet. Port comes from externalDatabase.port.
+  databaseEgress:
+    cidrs:
+      - 10.114.0.0/20

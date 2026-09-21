@@ -1,9 +1,15 @@
 Release {{ .Release.Name }} ({{ .Chart.Name }}-{{ .Chart.Version }}) installed into namespace {{ .Release.Namespace }}.
 
 Components:
-  postgres  {{ include "user-mgmt.image" .Values.postgres.image }}
   backend   {{ include "user-mgmt.image" .Values.backend.image }}
   frontend  {{ include "user-mgmt.image" .Values.frontend.image }}
+
+The database is external (DigitalOcean Managed PostgreSQL), provisioned by terraform/ and
+reached at {{ .Values.externalDatabase.host | default "<externalDatabase.host UNSET>" }}:{{ .Values.externalDatabase.port }}/{{ .Values.externalDatabase.database | default "<externalDatabase.database UNSET>" }}.
+Credentials come from the Secret "{{ .Values.externalDatabase.existingSecret }}", which this chart does NOT
+create -- see terraform/README.md. If the backend will not start, check that Secret exists in
+this namespace first: a missing secretKeyRef target leaves the pod in
+CreateContainerConfigError with no logs to read.
 
 Watch it come up:
 
