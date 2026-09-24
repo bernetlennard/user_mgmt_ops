@@ -94,18 +94,50 @@ kubectl apply -f policy/tests/invalid-deployment.yaml
 ```
 
 The request is denied by the admission webhook, and the error names each ClusterPolicy and
-rule that failed. Nothing is created:
+rule that failed. Output from the live cluster (2026-09-24):
 
-```bash
-kubectl -n staging get deploy kyverno-policy-violation-demo   # NotFound
+```text
+Error from server: error when creating "policy/tests/invalid-deployment.yaml": admission webhook "validate.kyverno.svc-fail" denied the request:
+
+resource Deployment/staging/kyverno-policy-violation-demo was blocked due to the following policies
+
+disallow-latest-tag:
+  autogen-disallow-latest: 'validation error: The :latest tag is not allowed -- it is mutable, so the running version cannot be traced back to a commit. Use the commit SHA tag the pipeline publishes. rule autogen-disallow-latest failed at path /spec/template/spec/containers/0/image/'
+disallow-privileged-containers:
+  autogen-privileged-containers: 'validation error: Privileged containers are not allowed: securityContext.privileged must be unset or false. rule autogen-privileged-containers failed at path /spec/template/spec/containers/0/securityContext/privileged/'
+require-probes:
+  require-readiness-and-liveness: 'validation error: Every container of a Deployment, StatefulSet or DaemonSet needs a readinessProbe and a livenessProbe. rule require-readiness-and-liveness failed at path /spec/template/spec/containers/0/livenessProbe/'
+require-resource-limits:
+  autogen-require-requests-and-limits: 'validation error: Every container needs resources.requests.cpu, resources.requests.memory, resources.limits.cpu and resources.limits.memory. rule autogen-require-requests-and-limits failed at path /spec/template/spec/containers/0/resources/limits/'
 ```
+
+`autogen-*` are the Deployment variants Kyverno generated from the Pod rules -- the reason the
+Deployment itself is refused. Nothing is created:
+
+```text
+$ kubectl -n staging get deploy kyverno-policy-violation-demo
+Error from server (NotFound): deployments.apps "kyverno-policy-violation-demo" not found
+```
+
+An image without any tag is caught by the second rule of `disallow-latest-tag`
+(`autogen-require-image-tag`), and a Job without probes -- the k6 load test -- is admitted,
+because `require-probes` only matches long-running controllers.
 
 The compliant counterpart passes. It is a server-side dry run, which still goes through every
 admission webhook, so this is a real verdict without starting a pod:
 
-```bash
-kubectl apply --dry-run=server -f policy/tests/valid-deployment.yaml
+```text
+$ kubectl apply --dry-run=server -f policy/tests/valid-deployment.yaml
+deployment.apps/kyverno-policy-compliant-demo created (server dry run)
 ```
+
+## What the background scan found
+
+Kyverno also scans what already runs (`kubectl get policyreport -A`). All live Deployments and
+Pods in `staging` and `prod` pass all four policies. The only `fail` results are two old
+frontend ReplicaSets from 2026-09-06 -- scaled to 0, kept only as rollout history -- whose
+pod template predates the resource limits. Nothing runs from them; a `kubectl rollout undo` to exactly
+that revision would now be refused, which is the point.
 
 ## For new services (module_service)
 
