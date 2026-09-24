@@ -8,6 +8,10 @@ backed by DigitalOcean Managed PostgreSQL and MySQL — running on DigitalOcean 
 (`k8s-user-mgmt`, fra1). The module service (Aufgabe 6) is documented, with the evidence, in
 [docs/module-service.md](docs/module-service.md).
 
+**New here? Start with [docs/ueberblick.md](docs/ueberblick.md)**: the whole project on one page,
+in German and without the technical detail (architecture, the path from code to live, the six
+Aufgaben).
+
 This is the **Ops repository**: it holds *how the application is deployed*, separately from the
 application source. ArgoCD watches this repo and reconciles the cluster against it, and the app
 repos' pipelines promote a new image by committing its tag here rather than by pushing to the
