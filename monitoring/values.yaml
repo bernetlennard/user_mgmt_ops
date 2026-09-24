@@ -83,19 +83,43 @@ alertmanager:
   # notification's body is that raw JSON, not nicely formatted prose. Readable (alertname,
   # status, labels are all in there), just not pretty. A nicer notification would need a small
   # transform proxy in front of ntfy, which is out of scope here.
+  #
+  # Routing is opt-in: the root route drops everything, and only the routes below reach the
+  # phone. The first version sent the root route to ntfy as well, which delivered the stack's
+  # own housekeeping alerts too -- Watchdog (fires permanently, by design), InfoInhibitor and
+  # info-level CPUThrottlingHigh -- every 3 hours, burying the one alert that matters.
+  # `routes` and `receivers` are lists, so setting them here replaces the chart's defaults
+  # wholesale; that is also how the chart's own Watchdog -> "null" route got lost.
   config:
     global: {}
     route:
-      receiver: ntfy-user-mgmt-alerts
-      group_by: [alertname, service]
+      receiver: "null"
+      # namespace is in the key so a staging and a prod incident arrive as two notifications,
+      # not one merged group.
+      group_by: [alertname, namespace, service]
       group_wait: 30s
       group_interval: 5m
       repeat_interval: 3h
       routes:
+        # Watchdog is the dead man's switch (always firing while the pipeline works) and
+        # InfoInhibitor only exists to mute info alerts -- neither is meant for a person.
+        - matchers:
+            - alertname =~ "Watchdog|InfoInhibitor"
+          receiver: "null"
+        # The application's own alert: the PrometheusRule in charts/user-mgmt.
         - matchers:
             - service = "user-mgmt-backend"
           receiver: ntfy-user-mgmt-alerts
+        # The stack's built-in rules (KubePodCrashLooping, KubeDeploymentReplicasMismatch,
+        # KubeHpaMaxedOut, ...), but only for the application namespaces and only from
+        # warning up. Platform noise and info-level alerts stay in the Alertmanager UI.
+        - matchers:
+            - namespace =~ "staging|prod"
+            - severity =~ "warning|critical"
+          receiver: ntfy-user-mgmt-alerts
     receivers:
+      # Alertmanager requires every receiver a route names to exist, even an empty one.
+      - name: "null"
       - name: ntfy-user-mgmt-alerts
         webhook_configs:
           - url: "https://ntfy.sh/user-mgmt-backend-alerts-0810489237b6"
@@ -216,10 +240,22 @@ grafana:
           options:
             path: /var/lib/grafana/dashboards/default
 
-  # Dashboard #2: the user_mgmt_service application dashboard (request rate, response time,
-  # error rate), provisioned as code so it survives a Grafana pod restart -- clicking a
-  # dashboard together in the UI does not satisfy "befindet sich im Ops Repository" and does
-  # not survive an eviction like the one this Grafana pod already had once.
+  # Dashboard #2: the user_mgmt_service application dashboard, provisioned as code so it
+  # survives a Grafana pod restart -- clicking a dashboard together in the UI does not satisfy
+  # "befindet sich im Ops Repository" and does not survive an eviction like the one this
+  # Grafana pod already had once.
+  #
+  # Two rows, with a namespace selector (staging/prod/All) at the top:
+  #   Application  request rate per endpoint, response time (avg + p95), error rate (5xx with
+  #                the alert threshold as a line, 4xx for context), requests per pod
+  #   Scaling      HPA current/desired/max vs available replicas, cpu per pod as % of its
+  #                request (the HPA's own metric, with its 70% target as a line), memory per pod
+  # The second row is what the k6 load test (k6/) is read off: scale-out, the replicas
+  # sharing the load, and `available` never reaching 0.
+  #
+  # The two dashed lines are hardcoded copies of monitoring.prometheusRule.errorRateThreshold
+  # and backend.autoscaling.targetCPUUtilizationPercentage in charts/user-mgmt -- update them
+  # here if those change.
   #
   # Metric names are Micrometer's default Spring Boot HTTP server timer
   # (http.server.requests -> http_server_requests_seconds_{count,sum,bucket} once exported via
@@ -238,55 +274,537 @@ grafana:
             "id": null,
             "uid": "user-mgmt-backend",
             "title": "user_mgmt_service - Application Metrics",
-            "tags": ["user-mgmt", "spring-boot"],
+            "tags": [
+              "user-mgmt",
+              "spring-boot"
+            ],
             "timezone": "browser",
             "schemaVersion": 39,
-            "version": 1,
+            "version": 2,
             "refresh": "30s",
-            "time": { "from": "now-1h", "to": "now" },
+            "time": {
+              "from": "now-1h",
+              "to": "now"
+            },
+            "templating": {
+              "list": [
+                {
+                  "name": "datasource",
+                  "label": "Data source",
+                  "type": "datasource",
+                  "query": "prometheus",
+                  "current": {
+                    "text": "Prometheus",
+                    "value": "prometheus"
+                  },
+                  "hide": 0
+                },
+                {
+                  "name": "namespace",
+                  "label": "Namespace",
+                  "type": "query",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "query": "label_values(http_server_requests_seconds_count{application=\"user-mgmt-service\"}, namespace)",
+                  "definition": "label_values(http_server_requests_seconds_count{application=\"user-mgmt-service\"}, namespace)",
+                  "refresh": 2,
+                  "sort": 1,
+                  "multi": true,
+                  "includeAll": true,
+                  "current": {
+                    "text": [
+                      "All"
+                    ],
+                    "value": [
+                      "$__all"
+                    ]
+                  },
+                  "hide": 0
+                }
+              ]
+            },
             "panels": [
               {
                 "id": 1,
-                "type": "timeseries",
-                "title": "Request Rate",
-                "datasource": null,
-                "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-                "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
-                "targets": [
-                  {
-                    "expr": "sum(rate(http_server_requests_seconds_count{application=\"user-mgmt-service\"}[$__rate_interval])) by (uri, method)",
-                    "legendFormat": "{{method}} {{uri}}",
-                    "refId": "A"
-                  }
-                ]
+                "type": "row",
+                "title": "Application: rate, errors, duration",
+                "collapsed": false,
+                "panels": [],
+                "gridPos": {
+                  "h": 1,
+                  "w": 24,
+                  "x": 0,
+                  "y": 0
+                }
               },
               {
                 "id": 2,
                 "type": "timeseries",
-                "title": "Average Response Time",
-                "datasource": null,
-                "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-                "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+                "title": "Request Rate",
+                "description": "Requests per second, per endpoint.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 0,
+                  "y": 1
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "reqps",
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
                 "targets": [
                   {
-                    "expr": "sum(rate(http_server_requests_seconds_sum{application=\"user-mgmt-service\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{application=\"user-mgmt-service\"}[$__rate_interval]))",
-                    "legendFormat": "avg response time",
-                    "refId": "A"
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, method, uri) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} {{method}} {{uri}}"
                   }
                 ]
               },
               {
                 "id": 3,
                 "type": "timeseries",
-                "title": "Error Rate",
-                "datasource": null,
-                "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
-                "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] },
+                "title": "Response Time (avg / p95)",
+                "description": "Average and 95th percentile across all replicas. p95 needs the histogram buckets enabled in user_mgmt_service's application.properties.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 12,
+                  "y": 1
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "s",
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
                 "targets": [
                   {
-                    "expr": "100 * sum(rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", outcome=\"SERVER_ERROR\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{application=\"user-mgmt-service\"}[$__rate_interval]))",
-                    "legendFormat": "error %",
-                    "refId": "A"
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace) (rate(http_server_requests_seconds_sum{application=\"user-mgmt-service\", namespace=~\"$namespace\"}[$__rate_interval])) / sum by (namespace) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} avg"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "histogram_quantile(0.95, sum by (namespace, le) (rate(http_server_requests_seconds_bucket{application=\"user-mgmt-service\", namespace=~\"$namespace\"}[$__rate_interval])))",
+                    "legendFormat": "{{namespace}} p95"
+                  }
+                ]
+              },
+              {
+                "id": 4,
+                "type": "timeseries",
+                "title": "Error Rate",
+                "description": "Share of responses by outcome. 5xx is the service failing; 4xx is the client being wrong (e.g. 401 on a bad password) and is shown for context only. The dashed line is the threshold of the UserMgmtBackendHighErrorRate alert (5% for 5 minutes).",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 0,
+                  "y": 9
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "percent",
+                    "min": 0,
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "red",
+                          "value": 5
+                        }
+                      ]
+                    },
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10,
+                      "thresholdsStyle": {
+                        "mode": "dashed"
+                      }
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "100 * (sum by (namespace) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\", outcome=\"SERVER_ERROR\"}[$__rate_interval])) or 0 * sum by (namespace) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\"}[$__rate_interval]))) / sum by (namespace) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} 5xx"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "100 * (sum by (namespace) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\", outcome=\"CLIENT_ERROR\"}[$__rate_interval])) or 0 * sum by (namespace) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\"}[$__rate_interval]))) / sum by (namespace) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} 4xx"
+                  }
+                ]
+              },
+              {
+                "id": 5,
+                "type": "timeseries",
+                "title": "Requests per Pod",
+                "description": "How the requests are spread over the backend replicas. With several replicas the lines run close together; a new replica only receives traffic once its readinessProbe passes.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 12,
+                  "y": 9
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "reqps",
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, pod) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{pod}}"
+                  }
+                ]
+              },
+              {
+                "id": 6,
+                "type": "row",
+                "title": "Scaling: HPA and resources (backend)",
+                "collapsed": false,
+                "panels": [],
+                "gridPos": {
+                  "h": 1,
+                  "w": 24,
+                  "x": 0,
+                  "y": 17
+                }
+              },
+              {
+                "id": 7,
+                "type": "timeseries",
+                "title": "Replicas",
+                "description": "HPA current/desired/max replicas and the pods that are actually available (Ready). available never dropping to 0 is the \"stays available while scaling\" evidence.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 18
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "min": 0,
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 0,
+                      "lineInterpolation": "stepAfter"
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "max by (namespace) (kube_horizontalpodautoscaler_status_current_replicas{namespace=~\"$namespace\", horizontalpodautoscaler=~\".*-backend-hpa\"})",
+                    "legendFormat": "{{namespace}} current"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "max by (namespace) (kube_horizontalpodautoscaler_status_desired_replicas{namespace=~\"$namespace\", horizontalpodautoscaler=~\".*-backend-hpa\"})",
+                    "legendFormat": "{{namespace}} desired"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "C",
+                    "expr": "max by (namespace) (kube_horizontalpodautoscaler_spec_max_replicas{namespace=~\"$namespace\", horizontalpodautoscaler=~\".*-backend-hpa\"})",
+                    "legendFormat": "{{namespace}} max"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "D",
+                    "expr": "sum by (namespace) (kube_deployment_status_replicas_available{namespace=~\"$namespace\", deployment=~\".*-backend\"})",
+                    "legendFormat": "{{namespace}} available"
+                  }
+                ]
+              },
+              {
+                "id": 8,
+                "type": "timeseries",
+                "title": "CPU per Pod (% of request)",
+                "description": "The metric the HPA scales on: cpu usage relative to the container's cpu request, not its limit. The dashed line is the HPA target (70%).",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 18
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "percent",
+                    "min": 0,
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "red",
+                          "value": 70
+                        }
+                      ]
+                    },
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10,
+                      "thresholdsStyle": {
+                        "mode": "dashed"
+                      }
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "100 * sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container=\"backend\"}[$__rate_interval])) / sum by (namespace, pod) (kube_pod_container_resource_requests{namespace=~\"$namespace\", container=\"backend\", resource=\"cpu\"})",
+                    "legendFormat": "{{pod}}"
+                  }
+                ]
+              },
+              {
+                "id": 9,
+                "type": "timeseries",
+                "title": "Memory per Pod",
+                "description": "Working set per backend pod, against the container's memory limit.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 16,
+                  "y": 18
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "bytes",
+                    "min": 0,
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, pod) (container_memory_working_set_bytes{namespace=~\"$namespace\", container=\"backend\"})",
+                    "legendFormat": "{{pod}}"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "max by (namespace) (kube_pod_container_resource_limits{namespace=~\"$namespace\", container=\"backend\", resource=\"memory\"})",
+                    "legendFormat": "{{namespace}} limit"
                   }
                 ]
               }
