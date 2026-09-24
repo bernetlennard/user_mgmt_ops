@@ -43,6 +43,54 @@ CI pipeline -- run it by hand, from your own machine, same reasoning as `monitor
   DOKS cluster.
 - `outputs.tf` -- the connection details, password outputs marked `sensitive`.
 
+## State
+
+The state lives in a local `terraform.tfstate` (gitignored) with whoever runs Terraform --
+there is no remote backend. It holds every database password in clear text, so it is handed
+over only through a private channel (e.g. an encrypted archive), never through git or an open
+chat. **Only one copy may be used for `apply`:** a second, older copy does not know about
+resources added since (e.g. the MySQL database of Aufgabe 6) and would try to create them
+again. Whoever receives the current file replaces their old one.
+
+Current holder: Lennard (rebuilt 2026-09-24, see below).
+
+### Rebuilding the state from the live infrastructure
+
+If the state file is lost or not available, it can be rebuilt without touching anything:
+import every resource with `import` blocks, check that the plan is import-only, apply it. Put
+the blocks into `restore-state.tf` (gitignored -- the IDs go stale the moment a resource is
+recreated, and a stale import block breaks every later `plan`), and delete the file afterwards.
+`import.tf` already covers the cluster.
+
+```hcl
+import {
+  to = digitalocean_database_cluster.postgres
+  id = "<db-cluster-id>"                    # doctl databases list
+}
+import {
+  to = digitalocean_database_db.staging     # same for .prod
+  id = "<db-cluster-id>,user_mgmt_staging"  # cluster id + database name
+}
+import {
+  to = digitalocean_database_user.staging   # same for .prod
+  id = "<db-cluster-id>,user_mgmt_staging"  # cluster id + user name
+}
+import {
+  to = digitalocean_database_firewall.postgres
+  id = "<db-cluster-id>"                    # a firewall is imported by its cluster's id
+}
+```
+
+```bash
+terraform plan -out=restore.tfplan   # must read "N to import, 0 to add, 0 to change, 0 to destroy"
+terraform apply restore.tfplan
+rm restore-state.tf restore.tfplan
+terraform plan                       # "No changes. Your infrastructure matches the configuration."
+```
+
+Done on 2026-09-24: `7 imported, 0 added, 0 changed, 0 destroyed`, followed by a clean
+`No changes` plan.
+
 ## Wire the credentials into Kubernetes
 
 The chart deliberately does not render the database Secret: that would put the managed

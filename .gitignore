@@ -26,3 +26,6 @@ terraform/*.auto.tfvars
 *.swp
 .DS_Store
 Thumbs.db
+
+# One-off import file used to rebuild the state (terraform/README.md, "Rebuilding the state").
+terraform/restore-state.tf
