@@ -5,9 +5,11 @@
 # frontend, both protected by a PDB. The per-pod resources repeat the values.yaml defaults on
 # purpose, so the difference to staging is readable in one file.
 #
-# The binding constraint is the node, not the quota. Both namespaces share one 2 vCPU / 4 GB
-# node with 1263m / 2156Mi available to them together, and memory runs out long before cpu
-# does. See docs/scaling.md.
+# The replica ceilings below were sized for the cluster's original 2 vCPU / 4 GB node, where
+# both namespaces together had 1263m / 2156Mi left and memory ran out long before cpu. The
+# node has since been resized to s-4vcpu-8gb (terraform/variables.tf) to make room for the
+# monitoring stack and Kyverno; the ceilings were deliberately kept, so the node is no longer
+# the binding constraint -- raise maxReplicas only together with the ResourceQuota below.
 
 # Prod's own logical database and user on the shared managed Postgres cluster. host/port come
 # from `terraform output database_private_host` / `database_port`; the credentials live in the
@@ -25,9 +27,9 @@ backend:
       memory: 700Mi
 
   # minReplicas 2 is the HA requirement: with one replica every rollout and eviction is an
-  # outage. maxReplicas 3 is what the node has room for -- steady state across both namespaces
-  # is 1440Mi of 2156Mi, and the remaining 716Mi fits one scale-out step (320Mi) plus the surge
-  # pod of a rollout (320Mi), but not a second step.
+  # outage. maxReplicas 3 is what the original 4 GB node had room for -- steady state across
+  # both namespaces was 1440Mi of 2156Mi, and the remaining 716Mi fitted one scale-out step
+  # (320Mi) plus the surge pod of a rollout (320Mi), but not a second step.
   autoscaling:
     enabled: true
     minReplicas: 2

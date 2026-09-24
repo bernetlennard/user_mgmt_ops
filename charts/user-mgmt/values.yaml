@@ -1,8 +1,10 @@
 # Base values. Each environment layers values-prod.yaml or values-staging.yaml on top.
 #
 # Every container declares cpu and memory limits: the namespace ResourceQuota caps limits.*,
-# and Kubernetes rejects containers without them. Requests sit close to measured usage
-# because the cluster is a single small node -- the arithmetic is in docs/scaling.md.
+# and Kubernetes rejects containers without them -- and so does the Kyverno policy
+# require-resource-limits (policy/policies/). Requests sit close to measured usage because the
+# cluster is a single node shared by both environments -- the arithmetic is in the comments of
+# values-prod.yaml and values-staging.yaml.
 
 # DigitalOcean Managed PostgreSQL (Aufgabe 4). The chart no longer runs a database of its
 # own -- no Deployment, no Service, no PVC -- it only points the backend at an external

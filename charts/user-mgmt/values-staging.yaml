@@ -2,9 +2,9 @@
 # argocd/application-staging.yaml on top of values.yaml.
 #
 # Staging is the tighter of the two: lower cpu ceilings, a smaller quota, single-replica
-# components. That is a capacity decision -- both namespaces share one 2 vCPU / 4 GB node
-# (see values-prod.yaml and docs/scaling.md), and a second staging replica would consume
-# exactly the headroom prod's autoscaler needs.
+# components. That was a capacity decision on the original 2 vCPU / 4 GB node shared by both
+# namespaces, where a second staging replica would have consumed exactly the headroom prod's
+# autoscaler needed (see the header of values-prod.yaml for the resize since).
 
 # Staging's own public hostnames, served by the same Traefik as prod.
 # `hosts` must be the complete list: Helm replaces it wholesale, so anything left out is not
