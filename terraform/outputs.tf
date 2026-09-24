@@ -61,3 +61,65 @@ output "database_admin_password" {
   value       = digitalocean_database_cluster.postgres.password
   sensitive   = true
 }
+
+# --- Managed MySQL for module_service (Aufgabe 6) ---
+
+output "mysql_private_host" {
+  description = "Private (VPC) hostname of the managed MySQL cluster."
+  value       = digitalocean_database_cluster.mysql.private_host
+}
+
+output "mysql_port" {
+  description = "Port of the managed MySQL cluster. Assigned by DigitalOcean; it is NOT 3306."
+  value       = digitalocean_database_cluster.mysql.port
+}
+
+output "mysql_database_staging" {
+  description = "Logical MySQL database for module_service in staging."
+  value       = digitalocean_database_db.module_service_staging.name
+}
+
+output "mysql_database_prod" {
+  description = "Logical MySQL database for module_service in prod."
+  value       = digitalocean_database_db.module_service_prod.name
+}
+
+output "mysql_user_staging" {
+  description = "MySQL user for module_service in staging."
+  value       = digitalocean_database_user.module_service_staging.name
+}
+
+output "mysql_user_prod" {
+  description = "MySQL user for module_service in prod."
+  value       = digitalocean_database_user.module_service_prod.name
+}
+
+output "mysql_password_staging" {
+  description = "Password of the staging MySQL user."
+  value       = digitalocean_database_user.module_service_staging.password
+  sensitive   = true
+}
+
+output "mysql_password_prod" {
+  description = "Password of the prod MySQL user."
+  value       = digitalocean_database_user.module_service_prod.password
+  sensitive   = true
+}
+
+output "mysql_admin_user" {
+  description = "Built-in admin user (doadmin) of the MySQL cluster. For one-time bootstrap only."
+  value       = digitalocean_database_cluster.mysql.user
+  sensitive   = true
+}
+
+output "mysql_admin_password" {
+  description = "Password of the MySQL admin user. For one-time bootstrap only."
+  value       = digitalocean_database_cluster.mysql.password
+  sensitive   = true
+}
+
+# Public certificate, not a secret: goes into the chart as-is (charts/user-mgmt/files/).
+output "mysql_ca_certificate" {
+  description = "PEM CA certificate of the managed MySQL cluster; module_service verifies the server against it."
+  value       = data.digitalocean_database_ca.mysql.certificate
+}

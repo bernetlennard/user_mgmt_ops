@@ -98,3 +98,47 @@ variable "database_user_prod" {
   type        = string
   default     = "user_mgmt_prod"
 }
+
+# --- Managed MySQL for module_service (Aufgabe 6) ---
+
+variable "mysql_cluster_name" {
+  description = "Name of the managed MySQL cluster."
+  type        = string
+  default     = "module-service-mysql"
+}
+
+variable "mysql_version" {
+  description = "Managed MySQL version. Check `doctl databases options versions` for what DigitalOcean currently offers before bumping."
+  type        = string
+  default     = "8.4"
+}
+
+variable "mysql_size" {
+  description = "Managed database node size slug. db-s-1vcpu-1gb is the smallest (and cheapest) tier."
+  type        = string
+  default     = "db-s-1vcpu-1gb"
+}
+
+variable "mysql_database_staging" {
+  description = "Logical MySQL database used by module_service in staging."
+  type        = string
+  default     = "module_service_staging"
+}
+
+variable "mysql_database_prod" {
+  description = "Logical MySQL database used by module_service in prod."
+  type        = string
+  default     = "module_service_prod"
+}
+
+variable "mysql_user_staging" {
+  description = "MySQL user for module_service in staging."
+  type        = string
+  default     = "module_service_staging"
+}
+
+variable "mysql_user_prod" {
+  description = "MySQL user for module_service in prod."
+  type        = string
+  default     = "module_service_prod"
+}

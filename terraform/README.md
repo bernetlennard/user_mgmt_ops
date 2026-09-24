@@ -41,6 +41,10 @@ CI pipeline -- run it by hand, from your own machine, same reasoning as `monitor
 - `database.tf` -- the managed PostgreSQL cluster (Aufgabe 4): one cluster, one logical
   database and one user per environment, plus a Trusted Sources firewall rule scoped to the
   DOKS cluster.
+- `mysql.tf` -- the managed MySQL cluster behind the module_service (Aufgabe 6): same shape as
+  `database.tf` (one logical database and one user per environment, firewall scoped to the
+  DOKS cluster), plus the cluster's CA certificate as a data source. See
+  [MySQL for the module_service](#mysql-for-the-module_service-aufgabe-6).
 - `outputs.tf` -- the connection details, password outputs marked `sensitive`.
 
 ## State
@@ -147,6 +151,39 @@ afterwards so Hibernate retries the DDL:
 kubectl -n staging rollout restart deploy user-mgmt-staging-user-mgmt-backend
 kubectl -n prod rollout restart deploy user-mgmt-prod-user-mgmt-backend
 ```
+
+## MySQL for the module_service (Aufgabe 6)
+
+`mysql.tf` adds a second managed cluster, because DigitalOcean runs one engine per cluster:
+MySQL 8.4 on `db-s-1vcpu-1gb` in the cluster's VPC, with `module_service_staging` and
+`module_service_prod` as database and user of the same name. Created on 2026-09-24 with
+`6 to add, 0 to change, 0 to destroy`, followed by a clean `No changes` plan.
+
+Only the module_service is wired to it. The chart gives the module-service pods alone the
+credentials (the `module-service-db` Secret) and the NetworkPolicy egress to the MySQL port;
+user_mgmt_service reaches module data only through the module_service's REST API.
+
+```bash
+# Values the chart needs (moduleService.database.host / .port in values.yaml):
+terraform output -raw mysql_private_host
+terraform output mysql_port
+
+# The CA the module_service verifies the server against. Public data, committed to the chart:
+terraform output -raw mysql_ca_certificate > ../charts/user-mgmt/files/module-service-mysql-ca.crt
+
+# The Secret, per namespace -- create it before the chart with the module_service reaches main,
+# or the pods sit in CreateContainerConfigError:
+for env in staging prod; do
+  kubectl create secret generic module-service-db \
+    --from-literal=username="$(terraform output -raw mysql_user_${env})" \
+    --from-literal=password="$(terraform output -raw mysql_password_${env})" \
+    -n "$env" --dry-run=client -o yaml | kubectl apply -f -
+done
+```
+
+No schema grant is planned here, unlike Postgres: the module_service creates its tables itself
+(the `migrate` init container) with the per-environment user. A missing privilege therefore
+shows up as a failing init container on the first rollout, not as a silently empty schema.
 
 ## Verify
 
