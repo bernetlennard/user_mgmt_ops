@@ -189,7 +189,7 @@ moduleService:
     name: module-service
     repository: bernetlennard/module_service
     # Owned by the promote pipeline in the module_service repo. Edit by hand only to roll back.
-    tag: "d182079cb33513959a1fb6203df8755ba13c22f4"
+    tag: "b7f403cf0a11ac61386adf35799be66ae0008028"
     pullPolicy: IfNotPresent
   replicaCount: 1
   strategy:
