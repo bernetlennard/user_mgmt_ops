@@ -7,7 +7,8 @@ type: application
 # Version of the chart itself; bump on every change to templates or values.
 # 0.3.0: the in-cluster PostgreSQL (Deployment/Service/PVC/Secret/ConfigMap) is gone; the
 # backend now points at a managed database provisioned in terraform/.
-version: 0.3.0
+# 0.3.1: the error-rate PrometheusRule only evaluates its own release's namespace.
+version: 0.3.1
 # Version of the application being deployed.
 appVersion: "0.1.0"
 icon: https://helm.sh/img/helm.svg
