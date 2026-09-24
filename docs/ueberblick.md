@@ -150,7 +150,7 @@ flowchart TD
 | Thema | Ort | Wie es live geht |
 |---|---|---|
 | App im Cluster (Frontend, Backend, module_service, Netzwerkregeln, Alarme) | [`charts/user-mgmt/`](../charts/user-mgmt/) | automatisch über ArgoCD, sobald auf `main` |
-| Monitoring (Prometheus, Grafana, Dashboards, Alarm → ntfy) | [`monitoring/`](../monitoring/) | von Hand mit `helm upgrade` |
+| Monitoring (Prometheus, Grafana mit den Dashboards *Ruhiger Betrieb* und *Lasttest*, Alarm → ntfy) | [`monitoring/`](../monitoring/) | von Hand mit `helm upgrade` |
 | Lasttests (k6) und Resultate | [`k6/`](../k6/) | von Hand mit `kubectl apply` |
 | Kyverno-Regeln | [`policy/`](../policy/) | Regeln über ArgoCD, Kyverno selbst von Hand |
 | Cluster + Datenbanken (Terraform) | [`terraform/`](../terraform/) | von Hand mit `terraform apply` |

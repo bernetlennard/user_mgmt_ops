@@ -48,10 +48,11 @@ kubectl -n staging get hpa user-mgmt-staging-user-mgmt-backend-hpa -w
 kubectl -n staging get pods -l app.kubernetes.io/component=backend -w
 ```
 
-In Grafana, open **user_mgmt_service - Application Metrics** with namespace `staging`: the
-first row shows request rate, response time (avg/p95), error rate and requests per pod; the
-*Scaling* row shows the HPA's replicas against the available pods and cpu as % of the request
-with the 70% target line.
+In Grafana, open **user_mgmt - Lasttest** with namespace `staging`: the top row splits the
+requests into load test and real users and the test's time range is shaded orange; the
+*Application* row shows request rate, response time (avg/p95), error rate and requests per pod;
+the *Scaling* row shows the HPA's replicas against the available pods and cpu as % of the
+request with the 70% target line.
 
 The scale-down happens about 5 minutes *after* the load ends (the HPA's scale-down
 stabilization window), i.e. after the Job has already completed -- keep watching.
@@ -94,7 +95,7 @@ running (6m00.4s), 00/20 VUs, 1841 complete and 0 interrupted iterations
 HPA events: `New size: 2; reason: cpu resource utilization (percentage of request) above
 target`, then `New size: 1; reason: All metrics below target`.
 
-### From Prometheus (dashboard "user_mgmt_service - Application Metrics", namespace staging)
+### From Prometheus (dashboard "user_mgmt - Lasttest", then called "user_mgmt_service - Application Metrics"; namespace staging)
 
 | Metric | Value |
 |---|---|

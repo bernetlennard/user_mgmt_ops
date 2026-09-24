@@ -41,6 +41,29 @@ kubectl -n monitoring port-forward svc/prometheus-stack-kube-prom-prometheus 909
 # open http://localhost:9090/targets -- the user-mgmt backend ServiceMonitor target should be UP
 ```
 
+## Dashboards
+
+Provisioned from `values.yaml` (folder *General*, tag `user-mgmt`; each has a *user_mgmt
+Dashboards* menu top right to switch between them):
+
+| Dashboard | For | Shows |
+|---|---|---|
+| **user_mgmt - Ruhiger Betrieb** (`user-mgmt-live`) | everyday operation | real users only: logins, failed logins, registrations, module assignments and 5xx of the last 10 minutes; one bar per minute; response time; pods; module_service circuit breaker. Refreshes every 10 s |
+| **user_mgmt - Lasttest** (`user-mgmt-backend`) | load tests (Aufgabe 2) | all traffic including k6, split into load test vs. real users; throughput, latency, errors, HPA, cpu, memory |
+| **module_service - Application Metrics** (`module-service`) | Aufgabe 6 | the module_service and the backend's calls to it |
+
+Load test vs. real user comes from the backend: k6 is recognised by its User-Agent (or any
+client sending `X-Load-Test`), and every request carries `source="loadtest"` or `source="user"`
+on `http_server_requests` and on the counter `user_mgmt_activity_total{event, source}`. That
+counter exists at 0 from startup, so even the first login on a quiet system shows up (a series
+that only appears with its first request is invisible to `increase()`). All three dashboards
+shade the time a k6 Job was running in orange.
+
+```bash
+kubectl -n monitoring port-forward svc/prometheus-stack-grafana 3000:80
+# http://localhost:3000/d/user-mgmt-live
+```
+
 ## Alertmanager notification channel
 
 Wired to [ntfy.sh](https://ntfy.sh) (decided 2026-09-14; no Slack workspace was available).

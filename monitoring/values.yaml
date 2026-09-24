@@ -245,7 +245,13 @@ grafana:
   # "befindet sich im Ops Repository" and does not survive an eviction like the one this
   # Grafana pod already had once.
   #
-  # Two rows, with a namespace selector (staging/prod/All) at the top:
+  # Titled "user_mgmt - Lasttest" since 2026-09-25: it shows ALL traffic including k6, and the
+  # quiet-operation view without load tests is dashboard #4 below. Every dashboard here shades
+  # the time a k6 Job was active (annotation on kube_job_status_active{namespace="k6"}).
+  #
+  # Three rows, with a namespace selector (staging/prod/All) at the top:
+  #   Lasttest oder echt?  requests/s split by the backend's `source` label (loadtest = k6,
+  #                user = everyone else), with a short how-to-read text
   #   Application  request rate per endpoint, response time (avg + p95), error rate (5xx with
   #                the alert threshold as a line, 4xx for context), requests per pod
   #   Scaling      HPA current/desired/max vs available replicas, cpu per pod as % of its
@@ -273,14 +279,14 @@ grafana:
           {
             "id": null,
             "uid": "user-mgmt-backend",
-            "title": "user_mgmt_service - Application Metrics",
+            "title": "user_mgmt - Lasttest",
             "tags": [
               "user-mgmt",
               "spring-boot"
             ],
             "timezone": "browser",
             "schemaVersion": 39,
-            "version": 2,
+            "version": 3,
             "refresh": "30s",
             "time": {
               "from": "now-1h",
@@ -327,6 +333,146 @@ grafana:
             },
             "panels": [
               {
+                "id": 10,
+                "type": "row",
+                "title": "Lasttest oder echt?",
+                "collapsed": false,
+                "panels": [],
+                "gridPos": {
+                  "h": 1,
+                  "w": 24,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "id": 11,
+                "type": "text",
+                "title": "So liest man dieses Dashboard",
+                "gridPos": {
+                  "h": 6,
+                  "w": 8,
+                  "x": 0,
+                  "y": 1
+                },
+                "options": {
+                  "mode": "markdown",
+                  "content": "Dieses Dashboard zeigt **alle** Anfragen, auch die vom **k6-Lasttest**.\n\n- **Orange hinterlegte Zeiträume**: ein k6-Job lief.\n- Rechts: welcher Anteil vom Lasttest kommt und welcher von echten Nutzern.\n- Die Zeilen darunter (Durchsatz, Skalierung, CPU) sind das, was ein Lasttest nachweist.\n\nFür den normalen Betrieb ohne Lasttests: Dashboard **user_mgmt - Ruhiger Betrieb** (Menü *user_mgmt Dashboards* oben rechts)."
+                }
+              },
+              {
+                "id": 12,
+                "type": "timeseries",
+                "title": "Anfragen pro Sekunde: Lasttest vs. echte Nutzer",
+                "description": "Nach dem Label source, das das Backend jeder Anfrage gibt: loadtest = k6 (am User-Agent erkannt) oder Header X-Load-Test, sonst echter Nutzer. Anfragen vor dem Backend-Update vom 25.09.2026 haben das Label noch nicht.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 6,
+                  "w": 16,
+                  "x": 8,
+                  "y": 1
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "reqps",
+                    "min": 0,
+                    "custom": {
+                      "drawStyle": "line",
+                      "lineWidth": 1,
+                      "fillOpacity": 25,
+                      "stacking": {
+                        "mode": "normal",
+                        "group": "A"
+                      }
+                    }
+                  },
+                  "overrides": [
+                    {
+                      "matcher": {
+                        "id": "byName",
+                        "options": "loadtest"
+                      },
+                      "properties": [
+                        {
+                          "id": "displayName",
+                          "value": "Lasttest (k6)"
+                        },
+                        {
+                          "id": "color",
+                          "value": {
+                            "mode": "fixed",
+                            "fixedColor": "orange"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "matcher": {
+                        "id": "byName",
+                        "options": "user"
+                      },
+                      "properties": [
+                        {
+                          "id": "displayName",
+                          "value": "echte Nutzer"
+                        },
+                        {
+                          "id": "color",
+                          "value": {
+                            "mode": "fixed",
+                            "fixedColor": "green"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "matcher": {
+                        "id": "byName",
+                        "options": "unbekannt"
+                      },
+                      "properties": [
+                        {
+                          "id": "displayName",
+                          "value": "ohne Kennung (vor dem Update)"
+                        },
+                        {
+                          "id": "color",
+                          "value": {
+                            "mode": "fixed",
+                            "fixedColor": "text"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": true
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "label_replace(sum by (source) (rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=~\"$namespace\", uri!~\"/actuator.*\"}[$__rate_interval])), \"source\", \"unbekannt\", \"source\", \"\")",
+                    "legendFormat": "{{source}}"
+                  }
+                ]
+              },
+              {
                 "id": 1,
                 "type": "row",
                 "title": "Application: rate, errors, duration",
@@ -336,7 +482,7 @@ grafana:
                   "h": 1,
                   "w": 24,
                   "x": 0,
-                  "y": 0
+                  "y": 7
                 }
               },
               {
@@ -352,7 +498,7 @@ grafana:
                   "h": 8,
                   "w": 12,
                   "x": 0,
-                  "y": 1
+                  "y": 8
                 },
                 "fieldConfig": {
                   "defaults": {
@@ -404,7 +550,7 @@ grafana:
                   "h": 8,
                   "w": 12,
                   "x": 12,
-                  "y": 1
+                  "y": 8
                 },
                 "fieldConfig": {
                   "defaults": {
@@ -465,7 +611,7 @@ grafana:
                   "h": 8,
                   "w": 12,
                   "x": 0,
-                  "y": 9
+                  "y": 16
                 },
                 "fieldConfig": {
                   "defaults": {
@@ -543,7 +689,7 @@ grafana:
                   "h": 8,
                   "w": 12,
                   "x": 12,
-                  "y": 9
+                  "y": 16
                 },
                 "fieldConfig": {
                   "defaults": {
@@ -592,7 +738,7 @@ grafana:
                   "h": 1,
                   "w": 24,
                   "x": 0,
-                  "y": 17
+                  "y": 24
                 }
               },
               {
@@ -608,7 +754,7 @@ grafana:
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 18
+                  "y": 25
                 },
                 "fieldConfig": {
                   "defaults": {
@@ -690,7 +836,7 @@ grafana:
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 18
+                  "y": 25
                 },
                 "fieldConfig": {
                   "defaults": {
@@ -759,7 +905,7 @@ grafana:
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 18
+                  "y": 25
                 },
                 "fieldConfig": {
                   "defaults": {
@@ -808,6 +954,37 @@ grafana:
                   }
                 ]
               }
+            ],
+            "description": "Alle Anfragen, inklusive k6-Lasttests: Durchsatz, Antwortzeit, Fehler, Skalierung. Orange hinterlegt = ein k6-Lasttest lief. Für den normalen Betrieb ohne Lasttests: \"user_mgmt - Ruhiger Betrieb\".",
+            "annotations": {
+              "list": [
+                {
+                  "name": "k6-Lasttest",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "enable": true,
+                  "hide": false,
+                  "iconColor": "rgba(255, 152, 48, 0.35)",
+                  "expr": "sum(kube_job_status_active{namespace=\"k6\"}) > 0",
+                  "step": "30s",
+                  "titleFormat": "k6-Lasttest läuft",
+                  "textFormat": "Ein k6-Job im Namespace k6 ist aktiv: die Anfragen in diesem Zeitraum kommen grösstenteils vom Lasttest."
+                }
+              ]
+            },
+            "links": [
+              {
+                "title": "user_mgmt Dashboards",
+                "type": "dashboards",
+                "tags": [
+                  "user-mgmt"
+                ],
+                "asDropdown": true,
+                "includeVars": true,
+                "keepTime": false
+              }
             ]
           }
       # Dashboard #3: the module_service (Aufgabe 6), same approach as #2. Three rows, with the
@@ -836,7 +1013,7 @@ grafana:
             ],
             "timezone": "browser",
             "schemaVersion": 39,
-            "version": 1,
+            "version": 2,
             "refresh": "30s",
             "time": {
               "from": "now-1h",
@@ -1534,6 +1711,929 @@ grafana:
                     "refId": "B",
                     "expr": "sum by (namespace) (rate(resilience4j_circuitbreaker_not_permitted_calls_total{application=\"user-mgmt-service\", name=\"moduleService\", namespace=~\"$namespace\"}[$__rate_interval]))",
                     "legendFormat": "{{namespace}} not_permitted"
+                  }
+                ]
+              }
+            ],
+            "annotations": {
+              "list": [
+                {
+                  "name": "k6-Lasttest",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "enable": true,
+                  "hide": false,
+                  "iconColor": "rgba(255, 152, 48, 0.35)",
+                  "expr": "sum(kube_job_status_active{namespace=\"k6\"}) > 0",
+                  "step": "30s",
+                  "titleFormat": "k6-Lasttest läuft",
+                  "textFormat": "Ein k6-Job im Namespace k6 ist aktiv: die Anfragen in diesem Zeitraum kommen grösstenteils vom Lasttest."
+                }
+              ]
+            },
+            "links": [
+              {
+                "title": "user_mgmt Dashboards",
+                "type": "dashboards",
+                "tags": [
+                  "user-mgmt"
+                ],
+                "asDropdown": true,
+                "includeVars": true,
+                "keepTime": false
+              }
+            ]
+          }
+      # Dashboard #4: "Ruhiger Betrieb" -- the quiet-operation counterpart of #2, which is now
+      # the load-test dashboard. Only real users (source="user"), last 10 minutes as counts,
+      # one bar per minute, response time, pods and the module_service circuit breaker.
+      # Counts come from user_mgmt_activity_total{event, source}, which the backend
+      # (UserActivityMetricsFilter) registers at 0 on startup: http_server_requests series only
+      # appear with their first request, and increase()/rate() cannot see that first increment,
+      # so a single registration on a quiet system never showed up there. The bars subtract the
+      # counter from its value one interval earlier instead of using increase(), which
+      # extrapolates and turns one event in a one-minute window into ~1.3 or 2.
+      user-mgmt-live:
+        json: |
+          {
+            "id": null,
+            "uid": "user-mgmt-live",
+            "title": "user_mgmt - Ruhiger Betrieb",
+            "description": "Was echte Nutzer in den letzten Minuten getan haben, ohne Lasttests: Logins, Registrierungen, Modul-Zuweisungen, Fehler.",
+            "tags": [
+              "user-mgmt",
+              "spring-boot"
+            ],
+            "timezone": "browser",
+            "schemaVersion": 39,
+            "version": 1,
+            "refresh": "10s",
+            "time": {
+              "from": "now-15m",
+              "to": "now"
+            },
+            "links": [
+              {
+                "title": "user_mgmt Dashboards",
+                "type": "dashboards",
+                "tags": [
+                  "user-mgmt"
+                ],
+                "asDropdown": true,
+                "includeVars": true,
+                "keepTime": false
+              }
+            ],
+            "annotations": {
+              "list": [
+                {
+                  "name": "k6-Lasttest",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "enable": true,
+                  "hide": false,
+                  "iconColor": "rgba(255, 152, 48, 0.35)",
+                  "expr": "sum(kube_job_status_active{namespace=\"k6\"}) > 0",
+                  "step": "30s",
+                  "titleFormat": "k6-Lasttest läuft",
+                  "textFormat": "Ein k6-Job im Namespace k6 ist aktiv: die Anfragen in diesem Zeitraum kommen grösstenteils vom Lasttest."
+                }
+              ]
+            },
+            "templating": {
+              "list": [
+                {
+                  "name": "datasource",
+                  "label": "Data source",
+                  "type": "datasource",
+                  "query": "prometheus",
+                  "current": {
+                    "text": "Prometheus",
+                    "value": "prometheus"
+                  },
+                  "hide": 0
+                },
+                {
+                  "name": "namespace",
+                  "label": "Umgebung",
+                  "type": "custom",
+                  "query": "prod,staging",
+                  "current": {
+                    "text": "prod",
+                    "value": "prod"
+                  },
+                  "options": [
+                    {
+                      "text": "prod",
+                      "value": "prod",
+                      "selected": true
+                    },
+                    {
+                      "text": "staging",
+                      "value": "staging",
+                      "selected": false
+                    }
+                  ],
+                  "multi": false,
+                  "includeAll": false,
+                  "hide": 0
+                }
+              ]
+            },
+            "panels": [
+              {
+                "id": 1,
+                "type": "text",
+                "title": "",
+                "gridPos": {
+                  "h": 3,
+                  "w": 24,
+                  "x": 0,
+                  "y": 0
+                },
+                "options": {
+                  "mode": "markdown",
+                  "content": "**Nur echte Nutzer, ohne Lasttests.** Die Kacheln zählen die **letzten 10 Minuten**, der Balkengraph zeigt jede Minute einzeln. Anfragen von k6 (Lasttest) sind hier herausgefiltert; die gibt es im Dashboard **user_mgmt - Lasttest**.\n\nOben links die Umgebung wählen (prod oder staging). Die Seite aktualisiert sich alle 10 Sekunden."
+                }
+              },
+              {
+                "id": 2,
+                "type": "stat",
+                "title": "Logins",
+                "description": "Erfolgreiche Anmeldungen. Letzte 10 Minuten.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 5,
+                  "w": 4,
+                  "x": 0,
+                  "y": 3
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "color": {
+                      "mode": "thresholds"
+                    },
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "blue",
+                          "value": null
+                        }
+                      ]
+                    },
+                    "mappings": []
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "reduceOptions": {
+                    "calcs": [
+                      "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                  },
+                  "colorMode": "background",
+                  "graphMode": "none",
+                  "justifyMode": "center",
+                  "textMode": "value_and_name",
+                  "orientation": "auto",
+                  "showPercentChange": false
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "round(sum(increase(user_mgmt_activity_total{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\", event=\"login\"}[10m]))) or vector(0)",
+                    "instant": true,
+                    "legendFormat": "__auto"
+                  }
+                ]
+              },
+              {
+                "id": 3,
+                "type": "stat",
+                "title": "Login fehlgeschlagen",
+                "description": "Falsches Passwort oder unbekannte E-Mail. Viele davon in kurzer Zeit können ein Angriff sein. Letzte 10 Minuten.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 5,
+                  "w": 4,
+                  "x": 4,
+                  "y": 3
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "color": {
+                      "mode": "thresholds"
+                    },
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "orange",
+                          "value": 1
+                        },
+                        {
+                          "color": "red",
+                          "value": 10
+                        }
+                      ]
+                    },
+                    "mappings": []
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "reduceOptions": {
+                    "calcs": [
+                      "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                  },
+                  "colorMode": "background",
+                  "graphMode": "none",
+                  "justifyMode": "center",
+                  "textMode": "value_and_name",
+                  "orientation": "auto",
+                  "showPercentChange": false
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "round(sum(increase(user_mgmt_activity_total{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\", event=\"login_failed\"}[10m]))) or vector(0)",
+                    "instant": true,
+                    "legendFormat": "__auto"
+                  }
+                ]
+              },
+              {
+                "id": 4,
+                "type": "stat",
+                "title": "Registrierungen",
+                "description": "Neu angelegte Benutzer. Letzte 10 Minuten.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 5,
+                  "w": 4,
+                  "x": 8,
+                  "y": 3
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "color": {
+                      "mode": "thresholds"
+                    },
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "purple",
+                          "value": null
+                        }
+                      ]
+                    },
+                    "mappings": []
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "reduceOptions": {
+                    "calcs": [
+                      "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                  },
+                  "colorMode": "background",
+                  "graphMode": "none",
+                  "justifyMode": "center",
+                  "textMode": "value_and_name",
+                  "orientation": "auto",
+                  "showPercentChange": false
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "round(sum(increase(user_mgmt_activity_total{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\", event=\"register\"}[10m]))) or vector(0)",
+                    "instant": true,
+                    "legendFormat": "__auto"
+                  }
+                ]
+              },
+              {
+                "id": 5,
+                "type": "stat",
+                "title": "Modul-Zuweisungen",
+                "description": "Erfolgreiche Zuweisungen eines Moduls an einen Benutzer (über den module_service). Letzte 10 Minuten.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 5,
+                  "w": 4,
+                  "x": 12,
+                  "y": 3
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "color": {
+                      "mode": "thresholds"
+                    },
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "blue",
+                          "value": null
+                        }
+                      ]
+                    },
+                    "mappings": []
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "reduceOptions": {
+                    "calcs": [
+                      "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                  },
+                  "colorMode": "background",
+                  "graphMode": "none",
+                  "justifyMode": "center",
+                  "textMode": "value_and_name",
+                  "orientation": "auto",
+                  "showPercentChange": false
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "round(sum(increase(user_mgmt_activity_total{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\", event=\"module_assign\"}[10m]))) or vector(0)",
+                    "instant": true,
+                    "legendFormat": "__auto"
+                  }
+                ]
+              },
+              {
+                "id": 6,
+                "type": "stat",
+                "title": "Serverfehler (5xx)",
+                "description": "Anfragen, die mit einem Fehler des Servers endeten, z. B. 503, wenn der module_service nicht erreichbar ist. Letzte 10 Minuten.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 5,
+                  "w": 4,
+                  "x": 16,
+                  "y": 3
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "color": {
+                      "mode": "thresholds"
+                    },
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "red",
+                          "value": 1
+                        }
+                      ]
+                    },
+                    "mappings": []
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "reduceOptions": {
+                    "calcs": [
+                      "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                  },
+                  "colorMode": "background",
+                  "graphMode": "none",
+                  "justifyMode": "center",
+                  "textMode": "value_and_name",
+                  "orientation": "auto",
+                  "showPercentChange": false
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "round(sum(increase(user_mgmt_activity_total{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\", event=\"server_error\"}[10m]))) or vector(0)",
+                    "instant": true,
+                    "legendFormat": "__auto"
+                  }
+                ]
+              },
+              {
+                "id": 7,
+                "type": "stat",
+                "title": "Lasttest gerade aktiv?",
+                "description": "Ob gerade ein k6-Job läuft. Seine Anfragen sind in diesem Dashboard ausgeblendet; im Lasttest-Dashboard sieht man sie.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 5,
+                  "w": 4,
+                  "x": 20,
+                  "y": 3
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "color": {
+                      "mode": "thresholds"
+                    },
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "orange",
+                          "value": 1
+                        }
+                      ]
+                    },
+                    "mappings": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "0": {
+                            "text": "nein",
+                            "index": 0
+                          }
+                        }
+                      },
+                      {
+                        "type": "range",
+                        "options": {
+                          "from": 1,
+                          "to": null,
+                          "result": {
+                            "text": "ja (ausgeblendet)",
+                            "index": 1
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "reduceOptions": {
+                    "calcs": [
+                      "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                  },
+                  "colorMode": "background",
+                  "graphMode": "none",
+                  "justifyMode": "center",
+                  "textMode": "value_and_name",
+                  "orientation": "auto",
+                  "showPercentChange": false
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum(kube_job_status_active{namespace=\"k6\"}) or vector(0)",
+                    "instant": true,
+                    "legendFormat": "__auto"
+                  }
+                ]
+              },
+              {
+                "id": 8,
+                "type": "timeseries",
+                "title": "Was ist passiert? (ein Balken = eine Minute)",
+                "description": "Anzahl Ereignisse pro Zeitabschnitt, ohne Lasttests. Bei der Standardansicht (letzte 15 Minuten) ist ein Balken eine Minute; bei längeren Zeiträumen fasst ein Balken mehr zusammen. Gezählt als Differenz der Zählerstände, deshalb ganze Zahlen statt der geschätzten Raten von rate().",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "interval": "1m",
+                "gridPos": {
+                  "h": 10,
+                  "w": 16,
+                  "x": 0,
+                  "y": 8
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "min": 0,
+                    "custom": {
+                      "drawStyle": "bars",
+                      "barAlignment": 1,
+                      "lineWidth": 1,
+                      "fillOpacity": 80,
+                      "stacking": {
+                        "mode": "normal",
+                        "group": "A"
+                      },
+                      "axisSoftMax": 3
+                    }
+                  },
+                  "overrides": [
+                    {
+                      "matcher": {
+                        "id": "byName",
+                        "options": "login"
+                      },
+                      "properties": [
+                        {
+                          "id": "displayName",
+                          "value": "Login"
+                        },
+                        {
+                          "id": "color",
+                          "value": {
+                            "mode": "fixed",
+                            "fixedColor": "blue"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "matcher": {
+                        "id": "byName",
+                        "options": "login_failed"
+                      },
+                      "properties": [
+                        {
+                          "id": "displayName",
+                          "value": "Login fehlgeschlagen"
+                        },
+                        {
+                          "id": "color",
+                          "value": {
+                            "mode": "fixed",
+                            "fixedColor": "orange"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "matcher": {
+                        "id": "byName",
+                        "options": "register"
+                      },
+                      "properties": [
+                        {
+                          "id": "displayName",
+                          "value": "Registrierung"
+                        },
+                        {
+                          "id": "color",
+                          "value": {
+                            "mode": "fixed",
+                            "fixedColor": "purple"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "matcher": {
+                        "id": "byName",
+                        "options": "module_assign"
+                      },
+                      "properties": [
+                        {
+                          "id": "displayName",
+                          "value": "Modul zugewiesen"
+                        },
+                        {
+                          "id": "color",
+                          "value": {
+                            "mode": "fixed",
+                            "fixedColor": "green"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "matcher": {
+                        "id": "byName",
+                        "options": "server_error"
+                      },
+                      "properties": [
+                        {
+                          "id": "displayName",
+                          "value": "Serverfehler (5xx)"
+                        },
+                        {
+                          "id": "color",
+                          "value": {
+                            "mode": "fixed",
+                            "fixedColor": "red"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "right",
+                    "showLegend": true,
+                    "calcs": [
+                      "sum"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc",
+                    "hideZeros": true
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (event) (clamp_min(user_mgmt_activity_total{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\"} - user_mgmt_activity_total{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\"} offset $__interval, 0) or (user_mgmt_activity_total{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\"} unless user_mgmt_activity_total{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\"} offset $__interval))",
+                    "legendFormat": "{{event}}"
+                  }
+                ]
+              },
+              {
+                "id": 9,
+                "type": "timeseries",
+                "title": "Antwortzeit echter Anfragen",
+                "description": "Durchschnittliche Antwortzeit des Backends über die letzten 5 Minuten, ohne Lasttests und ohne die Health-Checks. Ein Login dauert bewusst einige hundert Millisekunden (Passwort-Hashing mit Argon2). Lücken = in dieser Zeit keine Anfrage.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 10,
+                  "w": 8,
+                  "x": 16,
+                  "y": 8
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "s",
+                    "min": 0,
+                    "color": {
+                      "mode": "fixed",
+                      "fixedColor": "blue"
+                    },
+                    "custom": {
+                      "drawStyle": "line",
+                      "lineWidth": 2,
+                      "fillOpacity": 10,
+                      "showPoints": "always",
+                      "pointSize": 5,
+                      "spanNulls": false
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                  },
+                  "tooltip": {
+                    "mode": "single"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum(rate(http_server_requests_seconds_sum{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\", uri!~\"/actuator.*\"}[5m])) / sum(rate(http_server_requests_seconds_count{application=\"user-mgmt-service\", namespace=\"$namespace\", source=\"user\", uri!~\"/actuator.*\"}[5m]))",
+                    "legendFormat": "Durchschnitt"
+                  }
+                ]
+              },
+              {
+                "id": 10,
+                "type": "stat",
+                "title": "Laufende Pods",
+                "description": "Wie viele Kopien jedes Programms gerade bereit sind. 0 = dieser Teil ist ausgefallen.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 4,
+                  "w": 16,
+                  "x": 0,
+                  "y": 18
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "color": {
+                      "mode": "thresholds"
+                    },
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "red",
+                          "value": null
+                        },
+                        {
+                          "color": "green",
+                          "value": 1
+                        }
+                      ]
+                    },
+                    "mappings": []
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "reduceOptions": {
+                    "calcs": [
+                      "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                  },
+                  "colorMode": "background",
+                  "graphMode": "none",
+                  "justifyMode": "center",
+                  "textMode": "value_and_name",
+                  "orientation": "auto",
+                  "showPercentChange": false
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "label_replace(sum by (deployment) (kube_deployment_status_replicas_available{namespace=\"$namespace\", deployment=~\".*-(backend|frontend|module-service)\"}), \"komponente\", \"$1\", \"deployment\", \".*-user-mgmt-(.*)\")",
+                    "instant": true,
+                    "legendFormat": "{{komponente}}"
+                  }
+                ]
+              },
+              {
+                "id": 11,
+                "type": "stat",
+                "title": "Verbindung zum module_service",
+                "description": "Zustand des Circuit Breakers im Backend. \"unterbrochen\" heisst: der module_service hat zu oft nicht geantwortet, das Backend lehnt Modul-Anfragen sofort mit 503 ab und versucht es nach 15 Sekunden wieder.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 4,
+                  "w": 8,
+                  "x": 16,
+                  "y": 18
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "color": {
+                      "mode": "thresholds"
+                    },
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "red",
+                          "value": 1
+                        }
+                      ]
+                    },
+                    "mappings": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "0": {
+                            "text": "in Ordnung",
+                            "index": 0
+                          },
+                          "1": {
+                            "text": "unterbrochen",
+                            "index": 1
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "reduceOptions": {
+                    "calcs": [
+                      "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                  },
+                  "colorMode": "background",
+                  "graphMode": "none",
+                  "justifyMode": "center",
+                  "textMode": "value",
+                  "orientation": "auto",
+                  "showPercentChange": false
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "max(resilience4j_circuitbreaker_state{application=\"user-mgmt-service\", name=\"moduleService\", namespace=\"$namespace\", state=~\"open|half_open\"}) or vector(0)",
+                    "instant": true,
+                    "legendFormat": "__auto"
                   }
                 ]
               }
