@@ -184,7 +184,7 @@ frontend:
 # Scaled vertically, not horizontally: a fixed replica count per environment, with cpu and
 # memory limits sized from the load test in k6/ (see k6/README.md, "module_service").
 moduleService:
-  enabled: false
+  enabled: true
   image:
     name: module-service
     repository: bernetlennard/module_service
