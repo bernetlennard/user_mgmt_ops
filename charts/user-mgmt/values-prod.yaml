@@ -76,10 +76,12 @@ moduleService:
 #   pods            = 4 backend + 3 frontend + 3 module          =   10
 #   requests.cpu    = 4x100m + 3x50m + 3x50m                     =  700m
 #   requests.memory = 4x320Mi + 3x96Mi + 3x128Mi                 = 1952Mi
-#   limits.cpu      = 4x1000m + 3x300m + 3x500m                  = 6400m
+#   limits.cpu      = 4x1000m + 3x300m + 3x1000m                 = 7900m
 #   limits.memory   = 4x700Mi + 3x256Mi + 3x256Mi                = 4336Mi
 #
-# The module_service pushed the two limits over the old ceilings (6 / 4Gi); raised to 7 / 5Gi.
+# The module_service pushed the two limits over the old ceilings (6 / 4Gi); raised to 8 / 5Gi.
+# Limits are not reserved on the node (requests are), so this overcommits the 4 cores only in
+# the unlikely case that every pod bursts at once.
 # requests.memory at 2Gi now has less than 100Mi of headroom -- the first thing to raise if
 # any component grows.
 resourceQuota:
@@ -87,7 +89,7 @@ resourceQuota:
   hard:
     requests.cpu: "1"
     requests.memory: 2Gi
-    limits.cpu: "7"
+    limits.cpu: "8"
     limits.memory: 5Gi
     pods: "12"
     # The postgres PVC was the chart's only one, so real usage is now 0. Kept as a guard rail

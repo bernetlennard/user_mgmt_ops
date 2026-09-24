@@ -215,13 +215,18 @@ moduleService:
     # cluster's CA from `terraform output -raw mysql_ca_certificate`, public data). Host name
     # checking on top of that is only possible if the certificate names the private host.
     verifyHostname: true
-  # One uvicorn worker per pod; see k6/README.md for the measurements behind these numbers.
+  # Vertical scaling: one uvicorn worker per pod, sized by load test (docs/module-service.md).
+  # cpu is the binding resource: at 500m the pod sat at its limit under ~59 req/s and was
+  # throttled in 57% of CFS periods, which is where its p95 came from. 1 core is also the
+  # most a single Python process can use (GIL), so a higher limit would buy nothing without
+  # more workers. Memory stayed at 66Mi under the same load; 256Mi leaves ~4x headroom.
+  # The requests stay at the idle/typical level (4m / 60Mi measured) for scheduling.
   resources:
     requests:
       cpu: 50m
       memory: 128Mi
     limits:
-      cpu: 500m
+      cpu: "1"
       memory: 256Mi
   # All probes on the service port: the probe paths are not routed by any Ingress, and the
   # NetworkPolicy only admits the backend and Prometheus to this port anyway.

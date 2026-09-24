@@ -87,18 +87,18 @@ moduleService:
 #   pods            = 3 backend + 2 frontend + 2 module          =    7
 #   requests.cpu    = 3x100m + 2x50m  + 2x50m                    =  500m
 #   requests.memory = 3x320Mi + 2x96Mi + 2x128Mi                 = 1408Mi
-#   limits.cpu      = 3x750m + 2x200m + 2x500m                   = 3650m
+#   limits.cpu      = 3x750m + 2x200m + 2x1000m                  = 4650m
 #   limits.memory   = 3x700Mi + 2x256Mi + 2x256Mi                = 3124Mi
 #
 # The module_service pushed both limits over the old ceilings (3 / 3Gi), so they were raised
-# to 4 / 4Gi: a limit that the worst case exceeds does not slow a rollout down, it deadlocks it
+# to 5 / 4Gi: a limit that the worst case exceeds does not slow a rollout down, it deadlocks it
 # at "exceeded quota" -- and for the backend it would silently cap the autoscaler.
 resourceQuota:
   enabled: true
   hard:
     requests.cpu: 600m
     requests.memory: 1536Mi
-    limits.cpu: "4"
+    limits.cpu: "5"
     limits.memory: 4Gi
     pods: "8"
     # The postgres PVC was the chart's only one, so real usage is now 0. Kept as a guard rail
