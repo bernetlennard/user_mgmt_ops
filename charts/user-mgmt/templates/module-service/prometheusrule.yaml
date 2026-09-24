@@ -1,0 +1,47 @@
+{{- if and .Values.moduleService.enabled .Values.monitoring.enabled }}
+{{- $service := include "user-mgmt.componentName" (dict "ctx" $ "component" "module-service") }}
+# Two failure states of the module_service, both scoped to this release's namespace (see the
+# backend's PrometheusRule for why that scoping matters):
+#   ModuleServiceHighErrorRate  it answers, but too many answers are 5xx (e.g. MySQL down:
+#                               503 DATABASE_UNAVAILABLE)
+#   ModuleServiceUnavailable    no pod is Ready, so the backend's module endpoints answer 503
+# Both carry service="module-service"; Alertmanager routes them to ntfy through the
+# namespace/severity route in monitoring/values.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $service }}-alerts
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "module-service") | nindent 4 }}
+    release: {{ .Values.monitoring.prometheusReleaseLabel }}
+spec:
+  groups:
+    - name: module-service.rules
+      rules:
+        - alert: ModuleServiceHighErrorRate
+          expr: >-
+            (
+              sum by (namespace) (rate(http_requests_total{namespace="{{ .Release.Namespace }}", service="{{ $service }}", status=~"5.."}[5m]))
+              /
+              sum by (namespace) (rate(http_requests_total{namespace="{{ .Release.Namespace }}", service="{{ $service }}"}[5m]))
+            ) > {{ .Values.monitoring.prometheusRule.errorRateThreshold }}
+          for: {{ .Values.monitoring.prometheusRule.for }}
+          labels:
+            severity: {{ .Values.monitoring.prometheusRule.severity }}
+            service: module-service
+          annotations:
+            summary: "module_service ({{ .Release.Namespace }}): high 5xx error rate"
+            description: >-
+              {{ printf "More than %v%% of requests to module_service in %s have returned a 5xx response for at least %s." (mulf .Values.monitoring.prometheusRule.errorRateThreshold 100.0) .Release.Namespace .Values.monitoring.prometheusRule.for }}
+        - alert: ModuleServiceUnavailable
+          expr: >-
+            kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}", deployment="{{ $service }}"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: module-service
+          annotations:
+            summary: "module_service ({{ .Release.Namespace }}): no pod is ready"
+            description: >-
+              {{ printf "No module_service pod in %s has been Ready for 2 minutes. Module assignments through user_mgmt_service answer 503 until one is." .Release.Namespace }}
+{{- end }}

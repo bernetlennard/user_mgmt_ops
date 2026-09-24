@@ -1,0 +1,22 @@
+{{- if and .Values.moduleService.enabled .Values.monitoring.enabled }}
+# Prometheus scrapes the module_service's /metrics (prometheus_client, see the module_service
+# README for the series). Same `release` label rule as the backend's ServiceMonitor.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "module-service") }}
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "module-service") | nindent 4 }}
+    release: {{ .Values.monitoring.prometheusReleaseLabel }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "module-service") | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+{{- end }}

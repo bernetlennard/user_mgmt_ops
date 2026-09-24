@@ -130,6 +130,55 @@ spec:
       ports:
         - port: {{ .Values.externalDatabase.port }}
           protocol: TCP
+    {{- if .Values.moduleService.enabled }}
+    # The module_service, through its Service. Cilium evaluates the rule after the Service's
+    # virtual IP has been translated to a pod IP, so a podSelector is the right tool here.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "module-service") | nindent 14 }}
+      ports:
+        - port: {{ .Values.moduleService.service.port }}
+          protocol: TCP
+    {{- end }}
+{{- if .Values.moduleService.enabled }}
+---
+# 6. module_service: reachable only from the backend (and, via policy 7, Prometheus); may reach
+#    only its managed MySQL over the VPC. Neither the frontend nor the ingress controller can
+#    reach it, and it has no route to the Postgres port or the internet. This, together with
+#    the MySQL credentials existing only in the module_service's Secret, is what keeps the
+#    backend from accessing the module database directly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "user-mgmt.fullname" . }}-allow-module-service
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "netpol") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "module-service") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 14 }}
+      ports:
+        - port: {{ .Values.moduleService.service.port }}
+          protocol: TCP
+  egress:
+    - to:
+        {{- range .Values.networkPolicy.moduleServiceDatabaseEgress.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: {{ .Values.moduleService.database.port }}
+          protocol: TCP
+{{- end }}
 {{- if $.Values.monitoring.enabled }}
 ---
 # 5. Monitoring: Prometheus (running in the `monitoring` namespace) may reach the backend's
@@ -156,5 +205,30 @@ spec:
       ports:
         - port: {{ .Values.backend.management.port }}
           protocol: TCP
+{{- if .Values.moduleService.enabled }}
+---
+# 7. Monitoring for the module_service: Prometheus scrapes /metrics on the service port, which
+#    policy 6 otherwise only opens to the backend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "user-mgmt.fullname" . }}-allow-monitoring-module-service
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "netpol") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "module-service") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.monitoring.namespace }}
+      ports:
+        - port: {{ .Values.moduleService.service.port }}
+          protocol: TCP
+{{- end }}
 {{- end }}
 {{- end }}

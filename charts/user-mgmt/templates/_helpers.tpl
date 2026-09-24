@@ -66,7 +66,9 @@ trip out through the LoadBalancer and back in.
 {{- end }}
 
 {{/*
-PodDisruptionBudget for one component: (dict "ctx" $ "component" "backend").
+PodDisruptionBudget for one component: (dict "ctx" $ "component" "backend"). When the values key
+differs from the component name, pass it as well:
+(dict "ctx" $ "component" "module-service" "valuesKey" "moduleService").
 
 A PDB caps how many pods a VOLUNTARY disruption (a drain, a re-schedule) may take; it has no
 say over crashes or OOM kills. Exactly one of the two forms must be set:
@@ -78,7 +80,7 @@ say over crashes or OOM kills. Exactly one of the two forms must be set:
 Both or neither fails here at template time rather than in the cluster.
 */}}
 {{- define "user-mgmt.podDisruptionBudget" -}}
-{{- $cfg := (index .ctx.Values .component).podDisruptionBudget -}}
+{{- $cfg := (index .ctx.Values (default .component .valuesKey)).podDisruptionBudget -}}
 {{- if $cfg.enabled -}}
 {{- $hasMin := hasKey $cfg "minAvailable" -}}
 {{- $hasMax := hasKey $cfg "maxUnavailable" -}}
@@ -130,4 +132,45 @@ obvious ArgoCD sync error instead.
 {{- $host := required "externalDatabase.host is required -- get it from `terraform output -raw database_private_host`" .Values.externalDatabase.host }}
 {{- $database := required "externalDatabase.database is required -- set it per environment in values-staging.yaml / values-prod.yaml" .Values.externalDatabase.database }}
 {{- printf "jdbc:postgresql://%s:%v/%s?sslmode=%s" $host (.Values.externalDatabase.port | int) $database .Values.externalDatabase.sslMode }}
+{{- end }}
+
+{{/*
+Base url the backend uses to reach the module_service: the release's own module-service
+Service, so staging calls staging and prod calls prod. In-cluster only -- the module_service
+has no Ingress route.
+*/}}
+{{- define "user-mgmt.moduleService.internalUrl" -}}
+{{- printf "http://%s:%v" (include "user-mgmt.componentName" (dict "ctx" . "component" "module-service")) .Values.moduleService.service.port }}
+{{- end }}
+
+{{/*
+module_service database credentials, from the Secret created out of band from the Terraform
+outputs (terraform/README.md) -- never rendered by the chart, so ArgoCD neither manages nor
+prunes it. Shared by the migrate init container and the service container.
+*/}}
+{{- define "user-mgmt.moduleService.credentials" -}}
+- name: DB_USER
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.moduleService.database.existingSecret }}
+      key: {{ .Values.moduleService.database.usernameKey }}
+- name: DB_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.moduleService.database.existingSecret }}
+      key: {{ .Values.moduleService.database.passwordKey }}
+{{- end }}
+
+{{/*
+Container hardening for the module_service: nothing in it needs root, extra capabilities or a
+writable root filesystem. Also keeps it well inside the Kyverno policy
+disallow-privileged-containers (policy/policies/).
+*/}}
+{{- define "user-mgmt.moduleService.containerSecurityContext" -}}
+privileged: false
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: true
+capabilities:
+  drop:
+    - ALL
 {{- end }}

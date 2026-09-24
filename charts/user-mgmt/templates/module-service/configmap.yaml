@@ -1,0 +1,31 @@
+{{- if .Values.moduleService.enabled }}
+{{- $db := .Values.moduleService.database }}
+# Non-secret settings of the module_service, loaded as environment variables. The credentials
+# are not here: DB_USER/DB_PASSWORD come from the out-of-band Secret in the Deployment.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "module-service") }}
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "module-service") | nindent 4 }}
+data:
+  LOG_LEVEL: {{ .Values.moduleService.config.logLevel | quote }}
+  DB_HOST: {{ required "moduleService.database.host is required -- `terraform output -raw mysql_private_host`" $db.host | quote }}
+  DB_PORT: {{ $db.port | int | quote }}
+  DB_NAME: {{ required "moduleService.database.name is required -- set it per environment" $db.name | quote }}
+  MYSQL_SSL_CA: /etc/mysql-ca/ca.crt
+  MYSQL_SSL_VERIFY_HOSTNAME: {{ $db.verifyHostname | quote }}
+---
+# The managed MySQL's CA certificate (`terraform output -raw mysql_ca_certificate`), mounted as
+# a file. Public data, not a credential -- which is why it can live in git at all. Separate
+# from the settings above so it never ends up in the environment through envFrom.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "module-service") }}-mysql-ca
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "module-service") | nindent 4 }}
+data:
+  ca.crt: |
+    {{- required "files/module-service-mysql-ca.crt is missing -- see terraform/README.md" (.Files.Get "files/module-service-mysql-ca.crt") | nindent 4 }}
+{{- end }}

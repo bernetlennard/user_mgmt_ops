@@ -29,3 +29,7 @@ data:
   # this.
   SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: {{ .Values.backend.config.hikariMaxPoolSize | quote }}
   SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: {{ .Values.backend.config.hikariMinIdle | quote }}
+  # The module_service, reached synchronously through its Kubernetes Service. Timeouts, retry
+  # and circuit breaker around these calls are configured in the application itself
+  # (module-service.* in application.properties).
+  MODULE_SERVICE_BASE_URL: {{ include "user-mgmt.moduleService.internalUrl" . | quote }}

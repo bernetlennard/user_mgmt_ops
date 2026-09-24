@@ -1,0 +1,20 @@
+{{- if .Values.moduleService.enabled }}
+# In-cluster only. The backend reaches it by this name (MODULE_SERVICE_BASE_URL), Prometheus
+# through the ServiceMonitor next to it; no Ingress routes here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "user-mgmt.componentName" (dict "ctx" $ "component" "module-service") }}
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "module-service") | nindent 4 }}
+spec:
+  type: ClusterIP
+  # Round robin over the ready pods; the API is stateless.
+  sessionAffinity: None
+  selector:
+    {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "module-service") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.moduleService.service.port }}
+      targetPort: http
+{{- end }}

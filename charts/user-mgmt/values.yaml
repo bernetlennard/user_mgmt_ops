@@ -176,6 +176,83 @@ frontend:
   # Same either/or rule as the backend's, and likewise configured per environment.
   podDisruptionBudget:
     enabled: false
+# module_service (Aufgabe 6): FastAPI service owning the modules and the user-module
+# assignments, backed by the managed MySQL in terraform/mysql.tf. Internal only -- no Ingress
+# route; the backend calls it through its Service (backend.config -> MODULE_SERVICE_BASE_URL)
+# and the NetworkPolicy admits nothing else except Prometheus.
+#
+# Scaled vertically, not horizontally: a fixed replica count per environment, with cpu and
+# memory limits sized from the load test in k6/ (see k6/README.md, "module_service").
+moduleService:
+  enabled: false
+  image:
+    name: module-service
+    repository: bernetlennard/module_service
+    # Owned by the promote pipeline in the module_service repo. Edit by hand only to roll back.
+    tag: "d182079cb33513959a1fb6203df8755ba13c22f4"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  service:
+    port: 8080
+  config:
+    logLevel: INFO
+  # The managed MySQL. host/port from `terraform output -raw mysql_private_host` /
+  # `mysql_port`; the database name is set per environment. Credentials live in a Secret
+  # created out of band from the Terraform outputs (terraform/README.md), never in this file.
+  database:
+    host: private-module-service-mysql-do-user-39792807-0.g.db.ondigitalocean.com
+    port: 25060
+    name: ""
+    existingSecret: module-service-db
+    usernameKey: username
+    passwordKey: password
+    # The server certificate is verified against files/module-service-mysql-ca.crt (the
+    # cluster's CA from `terraform output -raw mysql_ca_certificate`, public data). Host name
+    # checking on top of that is only possible if the certificate names the private host.
+    verifyHostname: true
+  # One uvicorn worker per pod; see k6/README.md for the measurements behind these numbers.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # All probes on the service port: the probe paths are not routed by any Ingress, and the
+  # NetworkPolicy only admits the backend and Prometheus to this port anyway.
+  probes:
+    # Python starts in seconds, but the first readiness check has to open a TLS connection to
+    # MySQL. 30 x 2s of grace before the container is restarted.
+    startup:
+      httpGet:
+        path: /health/live
+        port: 8080
+      periodSeconds: 2
+      failureThreshold: 30
+      timeoutSeconds: 2
+    # Includes MySQL: a pod that lost its database leaves the Service endpoints.
+    readiness:
+      httpGet:
+        path: /health/ready
+        port: 8080
+      periodSeconds: 5
+      failureThreshold: 3
+      timeoutSeconds: 3
+    # Process only, never MySQL: a database outage must not restart every replica in a loop.
+    liveness:
+      httpGet:
+        path: /health/live
+        port: 8080
+      periodSeconds: 20
+      failureThreshold: 3
+      timeoutSeconds: 3
+  podDisruptionBudget:
+    enabled: false
 ingress:
   enabled: true
   className: traefik
@@ -253,5 +330,9 @@ networkPolicy:
   # `terraform output vpc_ip_range`. Scoped to the VPC rather than 0.0.0.0/0 so a compromised
   # backend still cannot reach the public internet. Port comes from externalDatabase.port.
   databaseEgress:
+    cidrs:
+      - 10.114.0.0/20
+  # The same VPC for the module_service's managed MySQL; port from moduleService.database.port.
+  moduleServiceDatabaseEgress:
     cidrs:
       - 10.114.0.0/20

@@ -58,27 +58,37 @@ frontend:
     enabled: true
     minAvailable: 1
 
+# Prod's own logical database on the shared managed MySQL (terraform/mysql.tf). Two replicas
+# for availability -- a rollout or a node drain never takes the module endpoints down -- not
+# for capacity: the module_service scales vertically, through its limits in values.yaml.
+moduleService:
+  replicaCount: 2
+  database:
+    name: module_service_prod
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
 # Namespace ceiling for `prod`. Worst case is the autoscaler at maxReplicas during a rollout:
-# backend 3 + 1 surge = 4 pods, frontend 2 + 1 = 3. The postgres term is gone since Aufgabe 4
-# -- the database is a managed service outside the cluster and consumes no namespace quota.
+# backend 3 + 1 surge = 4 pods, frontend 2 + 1 = 3, module_service 2 + 1 = 3. The databases
+# are managed services outside the cluster and consume no namespace quota.
 #
-#   pods            = 4 backend + 3 frontend          =    7
-#   requests.cpu    = 4x100m + 3x50m                  =  550m
-#   requests.memory = 4x320Mi + 3x96Mi                = 1568Mi
-#   limits.cpu      = 4x1000m + 3x300m                = 4900m
-#   limits.memory   = 4x700Mi + 3x256Mi               = 3568Mi
+#   pods            = 4 backend + 3 frontend + 3 module          =   10
+#   requests.cpu    = 4x100m + 3x50m + 3x50m                     =  700m
+#   requests.memory = 4x320Mi + 3x96Mi + 3x128Mi                 = 1952Mi
+#   limits.cpu      = 4x1000m + 3x300m + 3x500m                  = 6400m
+#   limits.memory   = 4x700Mi + 3x256Mi + 3x256Mi                = 4336Mi
 #
-# The numbers below clear that with room to spare: the node should be what runs out first, so
-# the quota stays a guard rail rather than becoming the scaling limit itself. Left unchanged
-# rather than tightened to the new sums -- re-tuning them is a separate decision from removing
-# the database.
+# The module_service pushed the two limits over the old ceilings (6 / 4Gi); raised to 7 / 5Gi.
+# requests.memory at 2Gi now has less than 100Mi of headroom -- the first thing to raise if
+# any component grows.
 resourceQuota:
   enabled: true
   hard:
     requests.cpu: "1"
     requests.memory: 2Gi
-    limits.cpu: "6"
-    limits.memory: 4Gi
+    limits.cpu: "7"
+    limits.memory: 5Gi
     pods: "12"
     # The postgres PVC was the chart's only one, so real usage is now 0. Kept as a guard rail
     # against a stray PVC appearing, not because anything claims one.

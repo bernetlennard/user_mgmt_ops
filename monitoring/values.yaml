@@ -810,3 +810,732 @@ grafana:
               }
             ]
           }
+      # Dashboard #3: the module_service (Aufgabe 6), same approach as #2. Three rows, with the
+      # same namespace selector:
+      #   Application  request rate per endpoint, response time (avg/p50/p95), error rate (5xx
+      #                with the ModuleServiceHighErrorRate threshold, 4xx for context), requests
+      #                per pod -- from the module_service's own /metrics (prometheus_client).
+      #   Resources    cpu and memory per pod against request and limit, throttling, restarts:
+      #                what the vertical sizing in charts/user-mgmt is read off.
+      #   Caller       the user_mgmt_service's side of the call: its REST client's requests,
+      #                the circuit breaker's state, retries and rejected calls (Resilience4j,
+      #                exported through Micrometer).
+      # Series are selected by the Service name (service=~".+-module-service"), which the
+      # ServiceMonitor puts on every scraped sample; the dashed 5% line is a hardcoded copy of
+      # monitoring.prometheusRule.errorRateThreshold in charts/user-mgmt.
+      module-service:
+        json: |
+          {
+            "id": null,
+            "uid": "module-service",
+            "title": "module_service - Application Metrics",
+            "tags": [
+              "user-mgmt",
+              "module-service",
+              "fastapi"
+            ],
+            "timezone": "browser",
+            "schemaVersion": 39,
+            "version": 1,
+            "refresh": "30s",
+            "time": {
+              "from": "now-1h",
+              "to": "now"
+            },
+            "templating": {
+              "list": [
+                {
+                  "name": "datasource",
+                  "label": "Data source",
+                  "type": "datasource",
+                  "query": "prometheus",
+                  "current": {
+                    "text": "Prometheus",
+                    "value": "prometheus"
+                  },
+                  "hide": 0
+                },
+                {
+                  "name": "namespace",
+                  "label": "Namespace",
+                  "type": "query",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "query": "label_values(http_requests_total{service=~\".+-module-service\"}, namespace)",
+                  "definition": "label_values(http_requests_total{service=~\".+-module-service\"}, namespace)",
+                  "refresh": 2,
+                  "sort": 1,
+                  "multi": true,
+                  "includeAll": true,
+                  "current": {
+                    "text": [
+                      "All"
+                    ],
+                    "value": [
+                      "$__all"
+                    ]
+                  },
+                  "hide": 0
+                }
+              ]
+            },
+            "panels": [
+              {
+                "id": 1,
+                "type": "row",
+                "title": "Application: rate, errors, duration",
+                "collapsed": false,
+                "panels": [],
+                "gridPos": {
+                  "h": 1,
+                  "w": 24,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "id": 2,
+                "type": "timeseries",
+                "title": "Request Rate",
+                "description": "Requests per second per endpoint (route template). Probes and the /metrics scrape are not counted.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 0,
+                  "y": 1
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "reqps",
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, method, path) (rate(http_requests_total{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} {{method}} {{path}}"
+                  }
+                ]
+              },
+              {
+                "id": 3,
+                "type": "timeseries",
+                "title": "Response Time (avg / p50 / p95)",
+                "description": "Server-side duration across all replicas, from the request histogram.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 12,
+                  "y": 1
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "s",
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace) (rate(http_request_duration_seconds_sum{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval])) / sum by (namespace) (rate(http_request_duration_seconds_count{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} avg"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "histogram_quantile(0.50, sum by (namespace, le) (rate(http_request_duration_seconds_bucket{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval])))",
+                    "legendFormat": "{{namespace}} p50"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "C",
+                    "expr": "histogram_quantile(0.95, sum by (namespace, le) (rate(http_request_duration_seconds_bucket{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval])))",
+                    "legendFormat": "{{namespace}} p95"
+                  }
+                ]
+              },
+              {
+                "id": 4,
+                "type": "timeseries",
+                "title": "Error Rate",
+                "description": "Share of responses by status class. 5xx is the service failing (503 = MySQL unreachable); 4xx is a caller asking for something that does not exist (404 MODULE_NOT_FOUND) and is shown for context. The dashed line is the threshold of the ModuleServiceHighErrorRate alert (5% for 5 minutes).",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 0,
+                  "y": 9
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "percent",
+                    "min": 0,
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "red",
+                          "value": 5
+                        }
+                      ]
+                    },
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10,
+                      "thresholdsStyle": {
+                        "mode": "dashed"
+                      }
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "100 * (sum by (namespace) (rate(http_requests_total{service=~\".+-module-service\", namespace=~\"$namespace\", status=~\"5..\"}[$__rate_interval])) or 0 * sum by (namespace) (rate(http_requests_total{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval]))) / sum by (namespace) (rate(http_requests_total{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} 5xx"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "100 * (sum by (namespace) (rate(http_requests_total{service=~\".+-module-service\", namespace=~\"$namespace\", status=~\"4..\"}[$__rate_interval])) or 0 * sum by (namespace) (rate(http_requests_total{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval]))) / sum by (namespace) (rate(http_requests_total{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} 4xx"
+                  }
+                ]
+              },
+              {
+                "id": 5,
+                "type": "timeseries",
+                "title": "Requests per Pod",
+                "description": "How the requests are spread over the module_service replicas.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 12,
+                  "y": 9
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "reqps",
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, pod) (rate(http_requests_total{service=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{pod}}"
+                  }
+                ]
+              },
+              {
+                "id": 6,
+                "type": "row",
+                "title": "Resources: vertical sizing (cpu and memory against the limits)",
+                "collapsed": false,
+                "panels": [],
+                "gridPos": {
+                  "h": 1,
+                  "w": 24,
+                  "x": 0,
+                  "y": 17
+                }
+              },
+              {
+                "id": 7,
+                "type": "timeseries",
+                "title": "CPU per Pod",
+                "description": "cpu usage in cores against the container's request and limit. A pod running at its limit gets throttled (next panel) -- raise the limit, not the replica count.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 18
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "cores",
+                    "min": 0,
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container=\"module-service\"}[$__rate_interval]))",
+                    "legendFormat": "{{pod}}"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "max by (namespace) (kube_pod_container_resource_limits{namespace=~\"$namespace\", container=\"module-service\", resource=\"cpu\"})",
+                    "legendFormat": "{{namespace}} limit"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "C",
+                    "expr": "max by (namespace) (kube_pod_container_resource_requests{namespace=~\"$namespace\", container=\"module-service\", resource=\"cpu\"})",
+                    "legendFormat": "{{namespace}} request"
+                  }
+                ]
+              },
+              {
+                "id": 8,
+                "type": "timeseries",
+                "title": "Memory per Pod",
+                "description": "Working set per pod against the memory limit. Reaching the limit means an OOMKill, not throttling.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 18
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "bytes",
+                    "min": 0,
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, pod) (container_memory_working_set_bytes{namespace=~\"$namespace\", container=\"module-service\"})",
+                    "legendFormat": "{{pod}}"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "max by (namespace) (kube_pod_container_resource_limits{namespace=~\"$namespace\", container=\"module-service\", resource=\"memory\"})",
+                    "legendFormat": "{{namespace}} limit"
+                  }
+                ]
+              },
+              {
+                "id": 9,
+                "type": "timeseries",
+                "title": "CPU Throttling / Restarts",
+                "description": "Share of CFS periods in which the container was throttled at its cpu limit, and container restarts (e.g. OOMKills) in the selected range.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 16,
+                  "y": 18
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "percent",
+                    "min": 0,
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "100 * sum by (namespace, pod) (rate(container_cpu_cfs_throttled_periods_total{namespace=~\"$namespace\", container=\"module-service\"}[$__rate_interval])) / sum by (namespace, pod) (rate(container_cpu_cfs_periods_total{namespace=~\"$namespace\", container=\"module-service\"}[$__rate_interval]))",
+                    "legendFormat": "{{pod}} throttled %"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "sum by (namespace) (increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\", container=\"module-service\"}[$__range]))",
+                    "legendFormat": "{{namespace}} restarts"
+                  }
+                ]
+              },
+              {
+                "id": 10,
+                "type": "row",
+                "title": "Caller: user_mgmt_service -> module_service (timeout, retry, circuit breaker)",
+                "collapsed": false,
+                "panels": [],
+                "gridPos": {
+                  "h": 1,
+                  "w": 24,
+                  "x": 0,
+                  "y": 26
+                }
+              },
+              {
+                "id": 11,
+                "type": "timeseries",
+                "title": "Calls from user_mgmt_service",
+                "description": "Outgoing requests of the backend's REST client, by endpoint and status. A connection failure or timeout shows up as IO_ERROR / CLIENT_ERROR instead of an HTTP status.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 27
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "reqps",
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, method, uri, status) (rate(http_client_requests_seconds_count{application=\"user-mgmt-service\", client_name=~\".+-module-service\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} {{method}} {{uri}} {{status}}"
+                  }
+                ]
+              },
+              {
+                "id": 12,
+                "type": "timeseries",
+                "title": "Circuit Breaker State",
+                "description": "Number of backend pods whose circuit breaker for the module_service is in each state. open = calls fail fast with 503 without reaching the module_service; half_open = a few trial calls are let through.",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 27
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "none",
+                    "decimals": 0,
+                    "min": 0,
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 20,
+                      "lineInterpolation": "stepAfter"
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, state) (resilience4j_circuitbreaker_state{application=\"user-mgmt-service\", name=\"moduleService\", namespace=~\"$namespace\", state=~\"closed|open|half_open\"})",
+                    "legendFormat": "{{namespace}} {{state}}"
+                  }
+                ]
+              },
+              {
+                "id": 13,
+                "type": "timeseries",
+                "title": "Retries and Rejected Calls",
+                "description": "Resilience4j outcomes per second: successful/failed with or without retry, and calls rejected by the open circuit (not_permitted).",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${datasource}"
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 16,
+                  "y": 27
+                },
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "ops",
+                    "min": 0,
+                    "custom": {
+                      "lineWidth": 1,
+                      "fillOpacity": 10
+                    }
+                  },
+                  "overrides": []
+                },
+                "options": {
+                  "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                      "mean",
+                      "max",
+                      "lastNotNull"
+                    ]
+                  },
+                  "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                  }
+                },
+                "targets": [
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "A",
+                    "expr": "sum by (namespace, kind) (rate(resilience4j_retry_calls_total{application=\"user-mgmt-service\", name=\"moduleService\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} {{kind}}"
+                  },
+                  {
+                    "datasource": {
+                      "type": "prometheus",
+                      "uid": "${datasource}"
+                    },
+                    "refId": "B",
+                    "expr": "sum by (namespace) (rate(resilience4j_circuitbreaker_not_permitted_calls_total{application=\"user-mgmt-service\", name=\"moduleService\", namespace=~\"$namespace\"}[$__rate_interval]))",
+                    "legendFormat": "{{namespace}} not_permitted"
+                  }
+                ]
+              }
+            ]
+          }

@@ -1,0 +1,97 @@
+{{- if .Values.moduleService.enabled }}
+{{- $name := include "user-mgmt.componentName" (dict "ctx" $ "component" "module-service") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "user-mgmt.labels" (dict "ctx" $ "component" "module-service") | nindent 4 }}
+spec:
+  # Fixed per environment: the module_service scales vertically (resources below), not
+  # through an HPA.
+  replicas: {{ .Values.moduleService.replicaCount }}
+  strategy:
+    {{- toYaml .Values.moduleService.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "module-service") | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Rolls the pods when a setting or the CA changes.
+        checksum/config: {{ include (print $.Template.BasePath "/module-service/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "module-service") | nindent 8 }}
+    spec:
+      # The image runs as uid 10001 (see the module_service Dockerfile); stated here so the
+      # kubelet refuses to start it as root even if the image changes.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      # Applies schema.sql before the service starts. Idempotent (CREATE TABLE IF NOT EXISTS,
+      # INSERT IGNORE), so it is safe on every pod start and with several pods starting at
+      # once -- and a schema change ships with the image, through the same GitOps flow.
+      initContainers:
+        - name: migrate
+          image: {{ include "user-mgmt.image" .Values.moduleService.image | quote }}
+          imagePullPolicy: {{ .Values.moduleService.image.pullPolicy }}
+          command: ["python", "-m", "app.migrate"]
+          env:
+            {{- include "user-mgmt.moduleService.credentials" . | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ $name }}
+          resources:
+            {{- toYaml .Values.moduleService.resources | nindent 12 }}
+          securityContext:
+            {{- include "user-mgmt.moduleService.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: mysql-ca
+              mountPath: /etc/mysql-ca
+              readOnly: true
+      containers:
+        - name: {{ .Values.moduleService.image.name }}
+          image: {{ include "user-mgmt.image" .Values.moduleService.image | quote }}
+          imagePullPolicy: {{ .Values.moduleService.image.pullPolicy }}
+          ports:
+            # API, probes and /metrics share this port; none of it is routed by an Ingress.
+            - name: http
+              containerPort: {{ .Values.moduleService.service.port }}
+          env:
+            {{- include "user-mgmt.moduleService.credentials" . | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ $name }}
+          resources:
+            {{- toYaml .Values.moduleService.resources | nindent 12 }}
+          securityContext:
+            {{- include "user-mgmt.moduleService.containerSecurityContext" . | nindent 12 }}
+          {{- with .Values.moduleService.probes.startup }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            {{- toYaml .Values.moduleService.probes.readiness | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.moduleService.probes.liveness | nindent 12 }}
+          volumeMounts:
+            - name: mysql-ca
+              mountPath: /etc/mysql-ca
+              readOnly: true
+            # The root filesystem is read-only; Python and uvicorn get a writable /tmp.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: mysql-ca
+          configMap:
+            name: {{ $name }}-mysql-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+{{- end }}

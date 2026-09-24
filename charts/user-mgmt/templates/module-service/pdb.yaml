@@ -1,0 +1,3 @@
+{{- if .Values.moduleService.enabled }}
+{{- include "user-mgmt.podDisruptionBudget" (dict "ctx" $ "component" "module-service" "valuesKey" "moduleService") }}
+{{- end }}
