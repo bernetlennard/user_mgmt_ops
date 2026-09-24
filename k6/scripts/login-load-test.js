@@ -28,9 +28,10 @@ const params = {
 };
 
 export const options = {
-  // Controlled, staged ramp: idle baseline -> moderate -> peak -> back to idle. 6 minutes
-  // total, comfortably longer than the HPA's 5-minute scale-down stabilization window
-  // (see charts/user-mgmt values), so the post-test scale-down is observable in the same run.
+  // Controlled, staged ramp: idle baseline -> moderate -> peak -> back to idle, 6 minutes
+  // total. The scale-down is NOT part of the run: the HPA waits out its 5-minute scale-down
+  // stabilization window (see charts/user-mgmt values) after the load drops, so it happens
+  // about 5 minutes after this script ends -- watch the HPA past the Job's completion.
   stages: [
     { duration: '1m', target: 5 },   // baseline
     { duration: '1m', target: 5 },   // hold baseline
