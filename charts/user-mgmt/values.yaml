@@ -326,13 +326,20 @@ networkPolicy:
   # to be an ipBlock, and it is the single reason the backend is allowed to leave the
   # namespace at all.
   #
-  # The CIDR is the VPC the cluster and the database share, from
-  # `terraform output vpc_ip_range`. Scoped to the VPC rather than 0.0.0.0/0 so a compromised
-  # backend still cannot reach the public internet. Port comes from externalDatabase.port.
+  # Each database is pinned to its own private IP (a /32), not the whole VPC: DigitalOcean
+  # gives the Postgres AND the MySQL cluster the same port, 25060, so a VPC-wide rule for the
+  # backend's Postgres would also have let the backend open connections to the module_service's
+  # MySQL (measured: it did). With /32s the backend reaches only Postgres and the module_service
+  # only MySQL. Port comes from externalDatabase.port / moduleService.database.port.
+  #
+  # The IPs are what the private hostnames resolve to (`nslookup` on
+  # `terraform output -raw database_private_host` / `mysql_private_host`). Both clusters are
+  # single-node; should DigitalOcean ever move one to a new IP (e.g. a resize), the pods'
+  # readiness checks fail and the ModuleServiceUnavailable / backend alerts fire -- update the
+  # IP here. The VPC range itself is 10.114.0.0/20 (`terraform output vpc_ip_range`).
   databaseEgress:
     cidrs:
-      - 10.114.0.0/20
-  # The same VPC for the module_service's managed MySQL; port from moduleService.database.port.
+      - 10.114.0.2/32   # private-user-mgmt-postgres-...
   moduleServiceDatabaseEgress:
     cidrs:
-      - 10.114.0.0/20
+      - 10.114.0.5/32   # private-module-service-mysql-...
