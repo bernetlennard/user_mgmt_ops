@@ -1,0 +1,84 @@
+# Declarative configuration for the Kyverno Helm release ("kyverno" in the `policy`
+# namespace). Like monitoring/values.yaml this is a separate Helm release, installed by hand --
+# see policy/README.md for the command. The ClusterPolicies themselves are NOT part of this
+# release: they live in policy/policies/ and are synced by ArgoCD
+# (argocd/application-policies.yaml), so a policy change is a git commit like any other.
+#
+# Chart version this was written against: kyverno-3.9.1 (app v1.19.1).
+#
+# Almost everything is left at the chart default on purpose. The defaults already give every
+# controller requests and a memory limit, run as non-root with a read-only root filesystem,
+# and exclude kube-system from the webhooks. What is set here is only what this cluster needs
+# on top of that.
+
+config:
+  # Which namespaces the API server sends to Kyverno's webhooks at all. The chart default only
+  # leaves out kube-system; this also leaves out every other platform namespace, i.e. the
+  # workloads installed from third-party charts that this repo does not control (and which
+  # would fail these policies -- ArgoCD, Grafana's sidecars, Traefik have no limits/probes).
+  #
+  # The per-policy `exclude` blocks in policy/policies/ list the same namespaces, and that is
+  # what decides the verdict. This selector is about availability: the policies run with
+  # failurePolicy Fail, so while the admission controller is down, every request the webhook
+  # matches is rejected. Without this selector a Kyverno restart would also block e.g. a
+  # Traefik or Prometheus pod from being recreated. Keep both lists in sync.
+  #
+  # Kyverno's own namespace (`policy`) is excluded by the chart already
+  # (excludeKyvernoNamespace: true), so Kyverno can always restart itself.
+  webhooks:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
+            - kube-public
+            - kube-node-lease
+            - default
+            - argocd
+            - monitoring
+
+# One replica per controller. The cluster is a single node, so a second admission-controller
+# replica would share every failure mode with the first and only cost memory. The tradeoff is
+# known: while the admission controller restarts, pod creation in the application namespaces
+# (staging, prod, ...) is rejected. That is the safe direction -- nothing unchecked slips
+# through -- and the platform namespaces above are not affected.
+admissionController:
+  replicas: 1
+  # Scraped by the kube-prometheus-stack release (monitoring/values.yaml). The `release` label
+  # is what that Prometheus selects ServiceMonitors by -- same coupling as the backend's
+  # ServiceMonitor in charts/user-mgmt.
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: prometheus-stack
+
+backgroundController:
+  replicas: 1
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: prometheus-stack
+
+reportsController:
+  replicas: 1
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: prometheus-stack
+
+# Only needed for CleanupPolicies, which nothing here uses -- but it is small (64Mi request)
+# and disabling it would make `kubectl get clustercleanuppolicies` a confusing dead end.
+cleanupController:
+  replicas: 1
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: prometheus-stack
+
+# Kyverno's own Grafana dashboard (admission requests, policy results, rule latency). The
+# chart renders it as a ConfigMap labeled grafana_dashboard=1; the Grafana sidecar from
+# kube-prometheus-stack watches that label in ALL namespaces, so it shows up in Grafana
+# without touching monitoring/values.yaml.
+grafana:
+  enabled: true

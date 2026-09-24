@@ -1,0 +1,63 @@
+# Long-running workloads must define a readinessProbe and a livenessProbe on every container.
+#
+# Why: the rolling updates in charts/user-mgmt (maxUnavailable 0) and the HPA's scale-out are
+# only zero-downtime because a new pod receives traffic once its readinessProbe passes, not
+# the moment its process starts. Without a readinessProbe a JVM that is still booting is put
+# into the Service immediately and answers 502s; without a livenessProbe a hung process is
+# never restarted.
+#
+# Matches the controllers directly instead of Pods: a Job's pod runs to completion and is
+# gone, so probes mean nothing there (the k6 load test in k6/ is exactly such a Job). A Pod
+# rule would reject Job pods too, because the Job controller creates them as plain Pods.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-probes
+  annotations:
+    policies.kyverno.io/title: Require readiness and liveness probes
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Deployment, StatefulSet, DaemonSet
+    policies.kyverno.io/description: >-
+      Deployments, StatefulSets and DaemonSets need a readinessProbe and a livenessProbe on
+      every container, so rollouts and scale-outs only route traffic to pods that are ready.
+spec:
+  background: true
+  rules:
+    - name: require-readiness-and-liveness
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+                - StatefulSet
+                - DaemonSet
+      # Same list as config.webhooks.namespaceSelector in policy/values.yaml.
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - default
+                - argocd
+                - monitoring
+                - policy
+      validate:
+        failureAction: Enforce
+        message: >-
+          Every container of a Deployment, StatefulSet or DaemonSet needs a readinessProbe
+          and a livenessProbe.
+        # periodSeconds is the field that is always there once a probe exists: the API server
+        # defaults it to 10 before admission. Matching on it therefore means "the probe is
+        # defined", whichever handler (httpGet, tcpSocket, exec, grpc) it uses.
+        pattern:
+          spec:
+            template:
+              spec:
+                containers:
+                  - readinessProbe:
+                      periodSeconds: ">0"
+                    livenessProbe:
+                      periodSeconds: ">0"

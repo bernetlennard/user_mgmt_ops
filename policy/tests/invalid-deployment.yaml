@@ -1,0 +1,40 @@
+# Deliberately INVALID -- the proof that Kyverno enforces policy/policies/. Never deployed by
+# ArgoCD (argocd/application-policies.yaml only syncs policy/policies/).
+#
+#   kubectl apply -f policy/tests/invalid-deployment.yaml
+#
+# must be rejected by the admission webhook, naming all four ClusterPolicies. Each violation
+# below is marked with the policy it breaks.
+#
+# Note what would happen WITHOUT Kyverno: the Deployment itself would be accepted, and only its
+# ReplicaSet would then fail to create pods ("must specify limits.cpu" from staging's
+# ResourceQuota) -- visible only in `kubectl describe rs`, while `kubectl apply` reports
+# success. Kyverno moves that failure to the moment of deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kyverno-policy-violation-demo
+  namespace: staging
+  labels:
+    app: kyverno-policy-violation-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kyverno-policy-violation-demo
+  template:
+    metadata:
+      labels:
+        app: kyverno-policy-violation-demo
+    spec:
+      containers:
+        - name: web
+          # disallow-latest-tag: floating tag
+          image: nginx:latest
+          # disallow-privileged-containers
+          securityContext:
+            privileged: true
+          # require-resource-limits: no resources block at all
+          # require-probes: no readinessProbe, no livenessProbe
+          ports:
+            - containerPort: 80

@@ -1,0 +1,70 @@
+# Every container must declare cpu and memory requests AND limits.
+#
+# Why: the cluster is a single node shared by staging, prod, monitoring and ArgoCD. A container
+# without a memory limit can take the whole node down with it (that is how Grafana got evicted
+# once -- see monitoring/values.yaml), and a container without requests is BestEffort QoS, the
+# first thing the kubelet kills under pressure. The HPA also needs the cpu request: utilisation
+# is measured against it, so without one the backend could never autoscale.
+#
+# Matches Pods; Kyverno's autogen turns this into the equivalent rules for Deployments,
+# StatefulSets, Jobs etc., so a violating Deployment is rejected at `kubectl apply` time
+# instead of only its Pods failing later inside the ReplicaSet.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require requests and limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Every container needs cpu and memory requests and limits, so that one workload cannot
+      starve the shared node and the HPA has a request to measure utilisation against.
+spec:
+  background: true
+  rules:
+    - name: require-requests-and-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      # Platform namespaces run third-party charts this repo does not control. Same list as
+      # config.webhooks.namespaceSelector in policy/values.yaml -- keep them in sync.
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - default
+                - argocd
+                - monitoring
+                - policy
+      validate:
+        failureAction: Enforce
+        message: >-
+          Every container needs resources.requests.cpu, resources.requests.memory,
+          resources.limits.cpu and resources.limits.memory.
+        pattern:
+          spec:
+            # =(...) means "if present": init containers are checked too, but a Pod without
+            # any is fine.
+            =(initContainers):
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"

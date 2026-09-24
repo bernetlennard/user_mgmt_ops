@@ -1,0 +1,83 @@
+# Every image must carry an explicit tag, and that tag must not be `latest`.
+#
+# Why: this repo's whole GitOps flow rests on immutable image references. The build pipelines
+# push :<commit-sha> and write exactly that SHA into charts/user-mgmt/values.yaml; ArgoCD then
+# deploys what git says. A floating tag breaks that chain -- `latest` means something different
+# on every pull, a rollback to "the previous commit" no longer rolls back the code, and
+# `kubectl get deploy -o wide` stops telling you what is actually running.
+#
+# Matches Pods; autogen covers Deployments, StatefulSets, Jobs etc.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow latest tag
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Images must be pinned to an explicit, immutable tag (this repo uses the git commit SHA).
+      An image without a tag or with `:latest` is rejected.
+spec:
+  background: true
+  rules:
+    # Two rules instead of one, because an untagged image (`nginx`) IS `nginx:latest` to the
+    # container runtime -- checking only for the literal `:latest` would let it through.
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      # Same list as config.webhooks.namespaceSelector in policy/values.yaml.
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - default
+                - argocd
+                - monitoring
+                - policy
+      validate:
+        failureAction: Enforce
+        message: >-
+          Every image needs an explicit tag (e.g. the git commit SHA). An untagged image
+          silently resolves to :latest.
+        pattern:
+          spec:
+            =(initContainers):
+              - image: "*:*"
+            containers:
+              - image: "*:*"
+    - name: disallow-latest
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - default
+                - argocd
+                - monitoring
+                - policy
+      validate:
+        failureAction: Enforce
+        message: >-
+          The :latest tag is not allowed -- it is mutable, so the running version cannot be
+          traced back to a commit. Use the commit SHA tag the pipeline publishes.
+        pattern:
+          spec:
+            =(initContainers):
+              - image: "!*:latest"
+            containers:
+              - image: "!*:latest"

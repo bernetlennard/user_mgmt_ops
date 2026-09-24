@@ -1,0 +1,61 @@
+# No privileged containers.
+#
+# Why: a privileged container has every Linux capability and access to all host devices -- it
+# is root on the node, and on a single-node cluster the node is everything: staging, prod,
+# the monitoring stack and ArgoCD's credentials. None of the application workloads needs it.
+# This is the "privileged" control of the Kubernetes Pod Security Standards (baseline).
+#
+# Matches Pods; autogen covers Deployments, StatefulSets, Jobs etc.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Disallow privileged containers
+    policies.kyverno.io/category: Pod Security Standards (Baseline)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Privileged containers have root access to the node and everything running on it.
+      securityContext.privileged must be unset or false.
+spec:
+  background: true
+  rules:
+    - name: privileged-containers
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      # Same list as config.webhooks.namespaceSelector in policy/values.yaml. kube-system is
+      # where the node-level privileged pods legitimately live (DigitalOcean's CSI driver,
+      # Cilium).
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - default
+                - argocd
+                - monitoring
+                - policy
+      validate:
+        failureAction: Enforce
+        message: >-
+          Privileged containers are not allowed: securityContext.privileged must be unset or
+          false.
+        # =(...) anchors: the check only applies where the field exists. Most containers set
+        # no securityContext at all, and that is allowed.
+        pattern:
+          spec:
+            =(ephemeralContainers):
+              - =(securityContext):
+                  =(privileged): "false"
+            =(initContainers):
+              - =(securityContext):
+                  =(privileged): "false"
+            containers:
+              - =(securityContext):
+                  =(privileged): "false"

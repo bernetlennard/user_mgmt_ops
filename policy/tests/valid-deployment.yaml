@@ -1,0 +1,49 @@
+# The compliant counterpart of invalid-deployment.yaml: the same container, fixed. Shows that
+# the policies reject what they should and nothing more. Only ever apply it as a dry run --
+# it would otherwise really start a pod in staging:
+#
+#   kubectl apply --dry-run=server -f policy/tests/valid-deployment.yaml
+#
+# A server-side dry run still passes through every admission webhook, Kyverno included, so an
+# accepted dry run is a real verdict.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kyverno-policy-compliant-demo
+  namespace: staging
+  labels:
+    app: kyverno-policy-compliant-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kyverno-policy-compliant-demo
+  template:
+    metadata:
+      labels:
+        app: kyverno-policy-compliant-demo
+    spec:
+      containers:
+        - name: web
+          # disallow-latest-tag: pinned
+          image: nginxinc/nginx-unprivileged:1.29-alpine
+          # disallow-privileged-containers: privileged unset
+          # require-resource-limits
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          # require-probes
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+          ports:
+            - containerPort: 8080

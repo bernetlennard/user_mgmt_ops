@@ -1,0 +1,28 @@
+# Syncs the Kyverno ClusterPolicies in policy/policies/ -- and only that directory, so the
+# deliberately invalid manifest in policy/tests/ is never deployed.
+#
+# Kyverno itself is NOT installed by this Application: it is a separate Helm release with its
+# own CRDs (policy/README.md). It has to exist first, otherwise the sync fails with
+# `no matches for kind "ClusterPolicy"`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-policies
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/bernetlennard/user_mgmt_ops.git
+    targetRevision: HEAD
+    path: policy/policies
+  # ClusterPolicies are cluster-scoped, so the namespace is only a formality -- Kyverno's
+  # namespace keeps it next to what it configures.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: policy
+  syncPolicy:
+    automated:
+      # A policy deleted from git is deleted from the cluster, and a policy edited by hand in
+      # the cluster is reverted -- git is the only place a policy can change.
+      prune: true
+      selfHeal: true
