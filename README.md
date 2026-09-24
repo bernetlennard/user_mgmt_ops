@@ -1,9 +1,12 @@
 # user_mgmt_ops
 
 Deployment configuration for the **user management stack** — a Spring Boot backend
-([`linosteiner/user_mgmt_service`](https://github.com/linosteiner/user_mgmt_service)) and a Next.js
-frontend ([`linosteiner/auth_portal`](https://github.com/linosteiner/auth_portal)), backed by a
-DigitalOcean Managed PostgreSQL — running on DigitalOcean Kubernetes (`k8s-user-mgmt`, fra1).
+([`linosteiner/user_mgmt_service`](https://github.com/linosteiner/user_mgmt_service)), a Next.js
+frontend ([`linosteiner/auth_portal`](https://github.com/linosteiner/auth_portal)) and a FastAPI
+module service ([`linosteiner/module_service`](https://github.com/linosteiner/module_service)),
+backed by DigitalOcean Managed PostgreSQL and MySQL — running on DigitalOcean Kubernetes
+(`k8s-user-mgmt`, fra1). The module service (Aufgabe 6) is documented, with the evidence, in
+[docs/module-service.md](docs/module-service.md).
 
 This is the **Ops repository**: it holds *how the application is deployed*, separately from the
 application source. ArgoCD watches this repo and reconciles the cluster against it, and the app
@@ -17,12 +20,12 @@ documentation of the earlier, pre-Helm setup.
 
 | Path | What | Delivered by |
 |---|---|---|
-| `charts/user-mgmt/` | the application chart: backend, frontend, ingress, HPA, PDB, NetworkPolicy, ResourceQuota, ServiceMonitor, PrometheusRule | ArgoCD (`argocd/application-{prod,staging}.yaml`) |
+| `charts/user-mgmt/` | the application chart: backend, frontend, module_service, ingress, HPA, PDB, NetworkPolicy, ResourceQuota, ServiceMonitor, PrometheusRule | ArgoCD (`argocd/application-{prod,staging}.yaml`) |
 | `argocd/` | the ArgoCD `Application` objects | `kubectl apply`, once |
 | `monitoring/` | kube-prometheus-stack: Prometheus, Alertmanager (→ ntfy), Grafana + dashboards | `helm upgrade` by hand — [monitoring/README.md](monitoring/README.md) |
 | `k6/` | load test as a one-off Job, for the HPA | `kubectl apply` on demand — [k6/README.md](k6/README.md) |
 | `policy/` | Kyverno: Helm values + ClusterPolicies | Kyverno by hand, policies via ArgoCD (`argocd/application-policies.yaml`) — [policy/README.md](policy/README.md) |
-| `terraform/` | the DOKS cluster (imported) and the managed PostgreSQL | `terraform apply` by hand — [terraform/README.md](terraform/README.md) |
+| `terraform/` | the DOKS cluster (imported), the managed PostgreSQL and the managed MySQL | `terraform apply` by hand — [terraform/README.md](terraform/README.md) |
 
 Only the application chart and the policies are continuously reconciled. The rest is platform
 infrastructure (cluster-scoped CRDs, webhooks, a billed load balancer or database) that is
@@ -42,6 +45,8 @@ Traefik routes by hostname into Ingress objects in every namespace. It still run
 | Backend | HPA 1–2 replicas | HPA 2–3 replicas |
 | Frontend | 1 replica | 2 replicas |
 | Database | `user_mgmt_staging` | `user_mgmt_prod` |
+| module_service | 1 replica | 2 replicas, PDB |
+| Module database (MySQL) | `module_service_staging` | `module_service_prod` |
 
 Both share one node (`s-4vcpu-8gb`), so the replica ceilings and ResourceQuotas are sized
 together — the arithmetic is in the comments of `values-prod.yaml` and `values-staging.yaml`.
@@ -56,7 +61,8 @@ helm install um-prod ./charts/user-mgmt -n prod --create-namespace \
 kubectl -n prod rollout status deploy/um-prod-user-mgmt-backend
 ```
 
-The backend needs the `user-mgmt-db` Secret in its namespace first — see
+The backend needs the `user-mgmt-db` Secret and the module_service the `module-service-db` Secret
+in the namespace first — see
 [terraform/README.md](terraform/README.md). Every object is named `<release>-<chart>-<component>`,
 so the chart is namespace-agnostic and installs cleanly more than once in the same cluster.
 
@@ -77,10 +83,11 @@ knowing:
 
 | Key | Note |
 |---|---|
-| `backend.image.tag` / `frontend.image.tag` | the lines the app pipelines rewrite on promotion — an immutable commit SHA |
+| `backend.image.tag` / `frontend.image.tag` / `moduleService.image.tag` | the lines the app pipelines rewrite on promotion — an immutable commit SHA |
 | `externalDatabase.*` | host/port from `terraform output`; credentials only via the `user-mgmt-db` Secret |
 | `backend.autoscaling` | HPA on cpu, enabled in both overlays |
 | `backend.podDisruptionBudget` | enabled in both overlays |
+| `moduleService.*` | image, replicas, MySQL host/port/database, resources (vertical sizing), probes; credentials only via the `module-service-db` Secret |
 | `ingress.hosts` | list; `/api` → backend and `/` → frontend are structural and stay in the template |
 | `monitoring.*` | ServiceMonitor + PrometheusRule wiring to the kube-prometheus-stack release |
 | `networkPolicy` / `resourceQuota` | namespace guardrails, enabled in both overlays |
@@ -88,7 +95,7 @@ knowing:
 ## Secrets
 
 The managed database credentials never enter git: the chart only references the `user-mgmt-db`
-Secret, which is created out of band from the Terraform outputs.
+and `module-service-db` Secrets, which are created out of band from the Terraform outputs.
 
 `backend.jwtSecret` is still a plain value in `values.yaml`, rendered into `Secret.stringData`.
 **This repository is private, and that is the only thing protecting it.** The real answer is
@@ -123,5 +130,7 @@ component:
 | `user-mgmt.labels` | the above plus chart/version/managed-by metadata |
 | `user-mgmt.image` | `repository:tag` from any image dict |
 | `user-mgmt.backend.internalUrl` | in-cluster backend URL for the frontend's server-side calls |
+| `user-mgmt.moduleService.internalUrl` | in-cluster module_service URL for the backend (`MODULE_SERVICE_BASE_URL`) |
+| `user-mgmt.moduleService.credentials` | `DB_USER` / `DB_PASSWORD` env from the `module-service-db` Secret |
 | `user-mgmt.podDisruptionBudget` | one PDB definition for every component; fails on min+max both set |
 | `user-mgmt.database.jdbcUrl` | JDBC URL for the managed database; fails the render if host/database are empty |

@@ -1,0 +1,34 @@
+# Aufgabe 6: the module_service load test, same setup as job.yaml (namespace `k6`, created
+# there, no NetworkPolicy): k6 goes through the public staging Ingress like a real client.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: module-service-load-test
+  namespace: k6
+spec:
+  backoffLimit: 0
+  # Above the script's 7-minute stage sum.
+  activeDeadlineSeconds: 900
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:1.3.0
+          args:
+            - run
+            - /scripts/module-service-load-test.js
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: k6-module-service-load-test

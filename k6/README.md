@@ -4,6 +4,11 @@ Runs `k6` as a one-off Kubernetes Job (namespace `k6`, no NetworkPolicy) against
 staging Ingress, to verify the backend's HPA under Aufgabe 2's acceptance criteria. Not
 deployed through ArgoCD -- see `job.yaml`'s own comment for why.
 
+The module_service load test of Aufgabe 6 (`module-service-job.yaml`,
+`scripts/module-service-load-test.js`, same test user) and its results are in
+[docs/module-service.md](../docs/module-service.md#load-test-and-vertical-sizing). Run it like
+this one, with `k6-module-service-load-test` as the ConfigMap name.
+
 ## One-time setup: the test user
 
 `scripts/login-load-test.js` logs in as a dedicated, pre-registered user so the script itself
