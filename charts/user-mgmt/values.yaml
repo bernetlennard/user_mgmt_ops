@@ -39,7 +39,7 @@ backend:
     name: backend
     repository: xxpirl2knc5/user_mgmt_service
     # Owned by the promote pipeline in the app repo. Edit by hand only to roll back.
-    tag: "66f2c7d61dc14934d5d8d25b86990feb7f421f19"
+    tag: "89e0f9c56ac509e9cf9438ee86540616f49a5aef"
     # The tag is an immutable commit SHA, so a cached layer can never be stale.
     pullPolicy: IfNotPresent
   # Only used when autoscaling is disabled; with an HPA the Deployment omits spec.replicas.
