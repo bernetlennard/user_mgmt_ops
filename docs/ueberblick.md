@@ -57,7 +57,7 @@ Frontend, Backend und module_service laufen je einmal in **staging** (Testversio
 | Baustein | Was er macht | Vergleich |
 |---|---|---|
 | **Traefik** | Eingangstür: Webseiten gehen ans Frontend, alles unter `/api` ans Backend | Rezeption eines Hotels |
-| **Frontend** (`auth_portal`) | die Seiten, die man sieht (Login, Benutzerliste); hat selbst keine Daten | Schaufenster |
+| **Frontend** (`auth_portal`) | die Seiten, die man sieht (Login, Benutzerliste, Module zuweisen); hat selbst keine Daten | Schaufenster |
 | **Backend** (`user_mgmt_service`) | Herz der App (Java): Login, Benutzer, Modul-Zuweisung; bei Last automatisch mehr Kopien | Sekretariat, das alles koordiniert |
 | **module_service** | eigener kleiner Dienst (Python), der die Module kennt und wer welches hat | Kursbüro mit eigener Modulliste |
 | **PostgreSQL** | Benutzer-Datenbank, von DigitalOcean betrieben, per Terraform angelegt | gemieteter Aktenschrank |
@@ -95,6 +95,11 @@ sequenceDiagram
 ```
 
 Statuscodes: `200` OK · `400` Eingabe falsch · `403` nicht erlaubt · `404` gibt's nicht · `503` Dienst kurz weg
+
+Im Browser geht das über die Dashboard-Seite **Modules**: Sie zeigt alle Module und weist eines
+per Klick zu. Ihr Server-Teil im Frontend fragt dafür das Backend im Cluster. Fällt der
+module_service aus, meldet die Seite, dass er kurz nicht verfügbar ist, und nennt die
+Wartezeit von 15 Sekunden.
 
 ## Vom Code bis live
 
@@ -179,4 +184,4 @@ flowchart TD
 
 ---
 
-*Stand 24.09.2026*
+*Stand 26.09.2026*

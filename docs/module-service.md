@@ -29,7 +29,7 @@ through the same client, so the same timeout, retry and circuit breaker apply.
 | Availability checked via the module_service API first | `UserModuleService.assign` → `ModuleServiceClient.findModule` | [E2E](#end-to-end-staging) (404 for an unknown module) |
 | Synchronous REST over the K8s Service, with timeout, retry, circuit breaker | `ModuleServiceConfig` / `ModuleServiceClient`, URL from `MODULE_SERVICE_BASE_URL` (chart: `user-mgmt.moduleService.internalUrl`) | [Failure case](#failure-case-module_service-down-staging) |
 | No direct access from user_mgmt_service to the MySQL | credentials only in the `module-service-db` Secret, mounted only by the module_service; NetworkPolicies | [Isolation](#isolation-backend-cannot-reach-mysql) |
-| E2E works, correct status codes for success and failure | — | [E2E](#end-to-end-staging), [Failure case](#failure-case-module_service-down-staging) |
+| E2E works, correct status codes for success and failure | the whole chain, from the auth_portal dashboard page *Modules* to MySQL | [E2E](#end-to-end-staging), [Failure case](#failure-case-module_service-down-staging) |
 | ServiceMonitor + new Grafana dashboard (rate, response time, error rate) | `templates/module-service/servicemonitor.yaml`, `monitoring/values.yaml` (dashboard #3) | [Monitoring](#monitoring) |
 | CPU/memory limits sized for load (vertical scaling) | `moduleService.resources` in `charts/user-mgmt/values.yaml` | [Load test](#load-test-and-vertical-sizing) |
 | Kyverno ClusterPolicies satisfied | the module_service Deployment | [Kyverno](#kyverno) |
@@ -87,6 +87,28 @@ Locally (both services in Docker, called through the frontend's route handlers),
 module_service container stopped: the assignment answered 503 with `Retry-After: 15` three
 times, the third already rejected by the open breaker in 26 ms; `GET /modules` answered 503 too.
 
+### Through the frontend
+
+The client end of the chain is the dashboard page *Modules* of auth_portal (`a773b04`, live in
+staging and prod since the promotion `8ca8efe` on 2026-09-25). It lists `GET /modules` and
+assigns a module with one click. Its route handlers under `/auth/` run in the frontend pod and
+forward the httpOnly `jwt` cookie as a bearer token to the backend Service of the same
+namespace, the one path the NetworkPolicy opens from the frontend. Checked on 2026-09-26
+against staging with the k6 test user:
+
+| Request (frontend route handler) | Status |
+|---|---|
+| `POST /auth/login`, sets the `jwt` cookie | **200** |
+| `GET /auth/modules` | **200** `CLOUD-ARCH, DATABASES, SECURITY, WEB-DEV` |
+| `PUT /auth/users/{me}/modules/{CLOUD-ARCH}` | **200** |
+| `PUT /auth/users/{me}/modules/00000000-…` (unknown module) | **404** |
+| `GET /auth/modules` without the cookie | **401** |
+| `GET /dashboard/modules` | **307** to `/login` without the cookie, **200** logged in |
+
+The page turns the backend's statuses into messages (`lib/modules.ts`): 503 says the module
+service is temporarily unavailable and to retry after the `Retry-After` seconds, 404 that the
+module is not available, 401 that the session has expired.
+
 ## Failure case: module_service down (staging)
 
 ArgoCD selfHeal paused, `kubectl -n staging scale deploy/…-module-service --replicas=0` at
@@ -105,6 +127,9 @@ pending at 21:23:25 and **fired at 21:25:25**; Alertmanager routed it to the
 `ntfy-user-mgmt-alerts` receiver. SelfHeal re-enabled at 21:26 → ArgoCD restored the replica;
 after the 15 s open window the breaker went half-open → closed and the same call answered
 **200** again (0.14 s).
+
+A longer run on 2026-09-25, with both alerts, their ntfy messages and the all-clears, is in
+[monitoring/README.md](../monitoring/README.md#proof-a-real-alert-end-to-end-2026-09-25).
 
 ## Isolation: backend cannot reach MySQL
 
