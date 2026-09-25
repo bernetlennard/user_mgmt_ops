@@ -6,9 +6,11 @@ metadata:
     {{- include "user-mgmt.labels" (dict "ctx" $ "component" "backend") | nindent 4 }}
 spec:
   type: ClusterIP
-  # Stated rather than defaulted: no affinity means requests go round-robin over the ready
-  # endpoints, while ClientIP would pin each client to one replica. Safe because the API is
-  # stateless -- authentication is a JWT in the request, not a server-side session.
+  # Stated rather than defaulted: no affinity means any request may go to any ready endpoint,
+  # while ClientIP would pin each client to one replica. Safe because the API is stateless --
+  # authentication is a JWT in the request, not a server-side session. Traffic from the
+  # internet does not use this ClusterIP at all: Traefik reads its ready endpoints and
+  # round-robins over them itself (k6/README.md, "Reading").
   sessionAffinity: None
   selector:
     {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 4 }}

@@ -112,9 +112,13 @@ target`, then `New size: 1; reason: All metrics below target`.
 
 - **The HPA works in both directions** — out within ~30 s of the load crossing the target,
   back in after exactly the configured 5-minute window.
-- **Availability held**: 0 failed requests and at least one Ready pod at every sample. The new
-  replica only received traffic after its readinessProbe passed, and the Service spread the
-  requests evenly over both replicas (round robin, `sessionAffinity: None`).
+- **Availability held**: 0 failed requests and at least one Ready pod at every sample.
+- **The distribution strategy** is Traefik's: its Ingress provider reads the backend Service's
+  endpoints and balances over them itself, weighted round robin with equal weights, no sticky
+  sessions (the ClusterIP is not used for Ingress traffic; `nativeLB` is off). Only *Ready*
+  endpoints are in that list, so the new replica received traffic exactly when its readinessProbe
+  passed (19:45:14), and from then on the two pods served 3.71 and 3.69 req/s at the peak. The
+  rollout settings (`maxUnavailable: 0`) and the PDB keep that list from ever running empty.
 - **The load is CPU-bound by design.** Passwords are hashed with Argon2 (Spring's
   `defaultsForSpringSecurity_v5_8`: 16 MiB, 2 iterations per hash), deliberately expensive
   to slow down brute force. Even the 5-VU baseline is above 70% of the 100m request, so the
