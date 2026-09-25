@@ -17,8 +17,9 @@ application source. ArgoCD watches this repo and reconciles the cluster against 
 repos' pipelines promote a new image by committing its tag here rather than by pushing to the
 cluster.
 
-It replaces the static manifests in `user_mgmt_service/k8s/`, which remain in the app repo only as
-documentation of the earlier, pre-Helm setup.
+It replaces the static manifests that used to live in `user_mgmt_service/k8s/` (removed with the
+in-cluster PostgreSQL, see that repo's git history); only Traefik and ArgoCD's own settings are
+still applied from there.
 
 ## Layout
 

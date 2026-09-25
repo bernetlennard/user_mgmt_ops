@@ -22,6 +22,26 @@ CI pipeline -- run it by hand, from your own machine, same reasoning as `monitor
    terraform init
    ```
 
+## How the cluster was imported (Aufgabe 3)
+
+The cluster was never created by Terraform. It was taken over like this, once:
+
+```bash
+# 1. import.tf holds only the import block (cluster id from `doctl kubernetes cluster list`);
+#    no resource block exists yet. Terraform writes one from the live cluster:
+terraform plan -generate-config-out=generated.tf
+
+# 2. Review generated.tf, fix it, move the result to cluster.tf and delete generated.tf.
+#    The raw output did not even validate (two provider bugs, see the header of cluster.tf):
+#    conflicting GPU blocks, and node_count/min_nodes/max_nodes = 0 for a 1-node pool.
+#    Hard-coded values became variables (variables.tf).
+
+# 3. Import only -- the plan must not change anything:
+terraform plan    # "1 to import, 0 to add, 0 to change, 0 to destroy"
+terraform apply
+terraform plan    # "No changes. Your infrastructure matches the configuration."
+```
+
 ## Files
 
 - `versions.tf` -- required Terraform + provider versions.
@@ -192,6 +212,9 @@ terraform fmt -check   # exits 0, no diff
 terraform validate     # "Success! The configuration is valid."
 terraform plan          # "No changes. Your infrastructure matches the configuration."
 ```
+
+Last run 2026-09-25 against the live cluster and both databases: `fmt -check` exit 0,
+`validate` "Success!", `plan` "No changes".
 
 ## Why the cluster still exists if you `terraform destroy` right now
 

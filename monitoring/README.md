@@ -92,7 +92,7 @@ same outcome.
 
 The topic name isn't a credential the way a Slack webhook URL is -- worst case is spam, not a
 compromise -- so it's plain text in `values.yaml` here rather than a mounted Secret, same
-reasoning as the backend's JWT secret (see the app repo's README, "Secrets"). Rotate it any
+reasoning as the backend's JWT secret (see the README, [Secrets](../README.md#secrets)). Rotate it any
 time by picking a new random name; nothing else depends on the old one.
 
 ## Why the ServiceMonitor/PrometheusRule in `charts/user-mgmt` carry `release: prometheus-stack`

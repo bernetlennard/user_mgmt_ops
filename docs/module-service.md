@@ -14,8 +14,12 @@ client ──HTTPS──▶ Traefik ──▶ user_mgmt_service ──HTTP (K8s 
 |---|---|
 | `PUT /users/{userId}/modules/{moduleId}` — assign (idempotent) | `GET /api/v1/modules/{id}` (available?), then `PUT /api/v1/users/{userId}/modules/{id}` |
 | `GET /users/{userId}/modules` — list a user's modules | `GET /api/v1/users/{userId}/modules` |
+| `GET /modules` — every module that can be assigned | `GET /api/v1/modules` |
 
-Allowed for the user themself or anyone with `USER_MODIFY`.
+The two `/users/{userId}/modules` endpoints are allowed for the user themself or anyone with
+`USER_MODIFY`; `GET /modules` for every logged-in user. `GET /modules` is how a client learns
+the module ids in the first place — the module_service itself has no Ingress. All three go
+through the same client, so the same timeout, retry and circuit breaker apply.
 
 ## Acceptance criteria
 
@@ -70,6 +74,18 @@ The breaker, retries and the client calls are exported through Micrometer
 | `PUT /users/00000000-…/modules/{CLOUD-ARCH}` (someone else) | **403** | 0.14 s |
 | `PUT` without a token | **403** | 0.07 s |
 | `GET /users/00000000-…` (unknown user) | **404** | 0.07 s |
+
+2026-09-25, backend `3ab53f9` (adds `GET /modules`), same staging API:
+
+| Request | Status |
+|---|---|
+| `GET /modules` | **200** `CLOUD-ARCH, DATABASES, SECURITY, WEB-DEV` |
+| `GET /modules` without a token | **403** |
+| `PUT /users/{me}/modules/{DATABASES}` | **200** |
+
+Locally (both services in Docker, called through the frontend's route handlers), with the
+module_service container stopped: the assignment answered 503 with `Retry-After: 15` three
+times, the third already rejected by the open breaker in 26 ms; `GET /modules` answered 503 too.
 
 ## Failure case: module_service down (staging)
 
