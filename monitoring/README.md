@@ -95,6 +95,59 @@ compromise -- so it's plain text in `values.yaml` here rather than a mounted Sec
 reasoning as the backend's JWT secret (see the README, [Secrets](../README.md#secrets)). Rotate it any
 time by picking a new random name; nothing else depends on the old one.
 
+## Proof: a real alert, end to end (2026-09-25)
+
+The synthetic alert above only proves Alertmanager → ntfy. This test drove the whole chain with a
+real outage in staging: the module_service at 0 replicas, real requests failing, Prometheus
+evaluating the rules, Alertmanager routing, ntfy delivering, and the all-clear afterwards.
+
+Procedure, in Git Bash (`alert-test.sh` and `alert-test-pause-argocd.yaml` are in this directory):
+
+```bash
+# 1. ArgoCD's selfHeal would put the replica straight back: pause automated sync for staging
+kubectl -n argocd patch application user-mgmt-staging --type merge \
+  --patch-file monitoring/alert-test-pause-argocd.yaml
+# 2. Traffic: one module assignment per second as the k6 test user, logged to ~/alert-test.log
+bash monitoring/alert-test.sh
+# 3. The outage, in a second terminal
+kubectl -n staging scale deploy/user-mgmt-staging-user-mgmt-module-service --replicas=0
+# 4. Watch Prometheus /alerts, Alertmanager and the ntfy topic, then restore automated sync;
+#    selfHeal brings the replica back
+kubectl apply -f argocd/application-staging.yaml
+```
+
+The patch is a file rather than an inline `-p '{...}'` because Windows PowerShell strips the
+quotes of inline JSON before kubectl sees them.
+
+Timeline in UTC, from `~/alert-test.log`, the Prometheus series `ALERTS` and the ntfy topic:
+
+| Time | Event |
+|---|---|
+| 18:26:29 | test loop starts: `PUT /api/users/{me}/modules/{CLOUD-ARCH}` answers 200 in ~0.10 s |
+| 18:28:06 | first 503, after 1.73 s: three attempts with 200 + 400 ms backoff |
+| 18:28:10 | circuit breaker open: 503 in ~75 ms, the module_service is no longer called |
+| 18:28:25 | `ModuleServiceUnavailable` pending: 0 available replicas, `for: 2m` starts |
+| 18:28:51 | `UserMgmtBackendHighErrorRate` pending: 5xx share over `rate[5m]` above 5 %, `for: 5m` starts |
+| 18:30:25 | `ModuleServiceUnavailable` **firing**, ntfy message at **18:30:56** (`group_wait` 30 s) |
+| 18:33:51 | `UserMgmtBackendHighErrorRate` **firing**, ntfy message at **18:34:21** |
+| 18:40:03 | first 200 again, after the restore |
+| 18:40:56 | ntfy: `ModuleServiceUnavailable` **resolved**, at the group's next `group_interval` tick |
+| 18:44:45 | the 5-minute 5xx share drops below 5 % |
+| 18:49:21 | ntfy: `UserMgmtBackendHighErrorRate` **resolved** |
+
+950 requests: 377 × 200 (0.10 s on average) and 573 × 503. The open breaker rejected 495 of the
+503s in 78 ms on average. The other 78 (about 0.69 s each, two every ~15 s) were the half-open
+trial calls going through their retries; `Retry-After: 15` matches that 15 s open window.
+
+What the numbers show:
+
+- **One outage, two alerts 3.5 minutes apart.** `ModuleServiceUnavailable` watches the replica
+  count with `for: 2m`. The error-rate rule needs a 5 % share of 5xx and then `for: 5m`.
+- **Notifications trail the alert state.** `group_wait` adds 30 s to the first message, and a
+  resolved alert is only sent at the group's next `group_interval` tick, up to 5 minutes later.
+- **The error-rate alert lags the recovery.** `rate[5m]` keeps counting the old 503s, so the rule
+  resolved at 18:44:45 although requests succeeded again from 18:40:03.
+
 ## Why the ServiceMonitor/PrometheusRule in `charts/user-mgmt` carry `release: prometheus-stack`
 
 This release's `Prometheus` custom resource only picks up `ServiceMonitor`/`PrometheusRule`

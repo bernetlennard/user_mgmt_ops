@@ -1,0 +1,7 @@
+# Merge patch for the alert test (monitoring/alert-test.sh): turns off ArgoCD's automated sync
+# for staging, so a module_service scaled to 0 stays at 0. Undo with
+#   kubectl apply -f argocd/application-staging.yaml
+# A file rather than inline JSON because PowerShell strips the quotes of an inline -p '{...}'.
+spec:
+  syncPolicy:
+    automated: null
