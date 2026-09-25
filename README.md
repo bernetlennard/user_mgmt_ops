@@ -114,9 +114,18 @@ Rotating it:
 openssl rand -base64 64 | tr -d '\n'
 ```
 
-It must be at least 256 bits — jjwt rejects a shorter HS256 key with `WeakKeyException`. The
-`checksum/config` annotation on the Deployments means a config change rolls the pods
-automatically.
+It must be at least 256 bits — jjwt rejects a shorter HS256 key with `WeakKeyException`.
+Commit the new value and ArgoCD rolls the backend: its pod template carries a `checksum/secret`
+annotation over this Secret next to `checksum/config` over the ConfigMap, so a change to either
+one changes the pods. Before chart 0.4.1 only the ConfigMap was hashed, and a new key reached
+only pods started later (a scale-out, a crash restart). Old and new pods then signed with
+different keys and rejected each other's tokens. Either way, every token signed with the old key
+stops working, so everyone has to log in again.
+
+The two database Secrets (`user-mgmt-db`, `module-service-db`) are created out of band, so no
+annotation can see them, and a pod reads them only when it starts. After re-creating one,
+restart the Deployments that use it — see
+[terraform/README.md](terraform/README.md#wire-the-credentials-into-kubernetes).
 
 ## Template helpers
 

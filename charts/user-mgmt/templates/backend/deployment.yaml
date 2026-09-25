@@ -22,6 +22,12 @@ spec:
         # A changed ConfigMap changes this hash, which changes the pod template and rolls
         # the pods so they pick the new value up.
         checksum/config: {{ include (print $.Template.BasePath "/backend/configmap.yaml") . | sha256sum }}
+        # The same for the chart's Secret (JWT_SECRET). Without it a new key only reached pods
+        # started afterwards -- a scale-out, a crash restart -- so old and new pods signed with
+        # different keys and rejected each other's tokens. Only the hash lands here, never the
+        # value. The database Secret (user-mgmt-db) is created out of band and cannot be hashed
+        # by the chart: after re-creating it, restart the Deployment (terraform/README.md).
+        checksum/secret: {{ include (print $.Template.BasePath "/backend/secret.yaml") . | sha256sum }}
       labels:
         {{- include "user-mgmt.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 8 }}
     spec:

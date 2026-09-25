@@ -137,6 +137,17 @@ for env in staging prod; do
 done
 ```
 
+A pod reads the Secret only when it starts, as environment variables, and no chart annotation
+can hash a Secret the chart does not render. After re-running this for a password rotation,
+restart the backends. Otherwise they keep the old password and fail as soon as the connection
+pool opens a new connection:
+
+```bash
+for env in staging prod; do
+  kubectl -n "$env" rollout restart deploy "user-mgmt-${env}-user-mgmt-backend"
+done
+```
+
 **Ordering matters.** Both ArgoCD Applications run with `prune: true`, so the moment a chart
 without the postgres templates reaches `HEAD`, ArgoCD deletes the old in-cluster Postgres
 Deployment *and its PVC* in both namespaces. Create these Secrets first: a backend pod whose
@@ -200,6 +211,9 @@ for env in staging prod; do
     -n "$env" --dry-run=client -o yaml | kubectl apply -f -
 done
 ```
+
+As with the backend, a rotated password takes effect only after a restart:
+`kubectl -n <env> rollout restart deploy user-mgmt-<env>-user-mgmt-module-service`.
 
 No schema grant is planned here, unlike Postgres: the module_service creates its tables itself
 (the `migrate` init container) with the per-environment user. A missing privilege therefore

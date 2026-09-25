@@ -10,7 +10,8 @@ type: application
 # 0.3.1: the error-rate PrometheusRule only evaluates its own release's namespace.
 # 0.4.0: the module_service (Aufgabe 6): Deployment with migrate init container, Service,
 # ServiceMonitor, PrometheusRule, PDB and NetworkPolicies; the backend reaches it by URL.
-version: 0.4.0
+# 0.4.1: the backend pods roll when the chart's Secret (JWT_SECRET) changes (checksum/secret).
+version: 0.4.1
 # Version of the application being deployed.
 appVersion: "0.1.0"
 icon: https://helm.sh/img/helm.svg
